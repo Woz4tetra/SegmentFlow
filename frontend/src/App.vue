@@ -4,8 +4,7 @@
     <main class="container">
       <router-view />
     </main>
-  </div>
-  
+  </div>  
 </template>
 
 <script lang="ts" setup>
