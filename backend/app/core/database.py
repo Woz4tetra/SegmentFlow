@@ -15,6 +15,11 @@ from sqlalchemy.pool import NullPool, StaticPool
 from app.core.config import settings
 
 
+def _is_sqlite(url: str) -> bool:
+    """Return True when the configured URL uses SQLite."""
+    return url.startswith("sqlite")
+
+
 class Base(DeclarativeBase):
     """Base class for all database models."""
     
@@ -22,17 +27,20 @@ class Base(DeclarativeBase):
 
 
 # Create async engine
+_use_sqlite = _is_sqlite(settings.DATABASE_URL)
+
+
 engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
-    # Use StaticPool for SQLite to avoid threading issues
-    poolclass=StaticPool if "sqlite" in settings.DATABASE_URL else NullPool,
+    # StaticPool avoids threading issues for in-process SQLite
+    poolclass=StaticPool if _use_sqlite else NullPool,
 )
 
 
 # Enable foreign keys for SQLite
-if "sqlite" in settings.DATABASE_URL:
+if _use_sqlite:
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_conn, connection_record):
         """Enable foreign key support in SQLite.

@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     # Database configuration
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:///./segmentflow.db",
-        description="Database connection URL. Use sqlite+aiosqlite:// for SQLite or postgresql+asyncpg:// for PostgreSQL",
+        description=(
+            "Database URL. Example: sqlite+aiosqlite:///./segmentflow.db or "
+            "postgresql+asyncpg://user:password@localhost:5432/segmentflow"
+        ),
     )
     
     # CORS configuration
@@ -71,7 +74,7 @@ class Settings(BaseSettings):
         description="Transparency level for mask overlays",
     )
     BIG_JUMP_SIZE: int = Field(
-        default=10,
+        default=500,
         description="Number of frames to jump with 'big jump' navigation",
     )
 
