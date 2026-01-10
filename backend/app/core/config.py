@@ -1,5 +1,6 @@
 """Application configuration settings."""
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -7,15 +8,14 @@ from typing import Any, Dict, List, Optional
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Use tomllib for Python 3.11+, otherwise use tomli
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    try:
-        import tomli as tomllib  # type: ignore
-    except ImportError:
-        tomllib = None  # type: ignore
+from app.core.logging import setup_logging
+from app.core.schema import Config
+from app.core.schema import from_dict
 
+import tomllib
+
+# Setup logging for this module
+logger = setup_logging(__name__)    
 
 class Settings(BaseSettings):
     """Application settings.
@@ -126,23 +126,20 @@ class Settings(BaseSettings):
     )
 
 
-def _load_toml_config() -> Dict[str, Any]:
-    """Load configuration from TOML file.
+def _load_toml_config() -> Config:
+    """Load and parse configuration from TOML file with validation.
     
     Looks for config.toml in the following locations (in order):
     1. ~/.config/segmentflow/config.toml (Linux/macOS user config directory)
     2. ./config.toml (current working directory)
-    3. If not found, returns empty dict
+    3. If not found, returns default Config
     
     Returns:
-        Dictionary of configuration values from TOML file, or empty dict if not found
+        Parsed and validated Config dataclass instance
         
     Raises:
-        ValueError: If TOML file exists but cannot be parsed
+        ValueError: If TOML file exists but cannot be parsed or validated
     """
-    if tomllib is None:
-        return {}
-    
     config_locations = [
         Path.home() / ".config" / "segmentflow" / "config.toml",
         Path("config.toml"),
@@ -153,88 +150,126 @@ def _load_toml_config() -> Dict[str, Any]:
             try:
                 with open(config_path, "rb") as f:
                     toml_data = tomllib.load(f)
-                print(f"✓ Loaded configuration from {config_path}")
-                return toml_data
+                
+                # Validate TOML structure using schema
+                try:
+                    config = from_dict(Config, toml_data)
+                    logger.info(f"Loaded and validated configuration from {config_path}")
+                    return config
+                except Exception as e:
+                    raise ValueError(
+                        f"Configuration validation failed: {e}"
+                    ) from e
             except (tomllib.TOMLDecodeError, OSError) as e:
                 raise ValueError(
                     f"Failed to parse TOML configuration file at {config_path}: {e}"
                 ) from e
     
-    # No config file found - this is not an error, use defaults
-    return {}
+    # No config file found - return default configuration
+    return Config()
 
 
-def _merge_toml_with_env(toml_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge TOML configuration with environment variables.
-    
-    Environment variables take precedence over TOML values.
-    Also handles nested configuration sections (e.g., [database], [processing]).
+def _to_int(value: Any, default: int = 0) -> int:
+    """Convert value to integer with fallback default.
     
     Args:
-        toml_config: Configuration dictionary loaded from TOML file
+        value: Value to convert (can be int, str, or None)
+        default: Default value if conversion fails
+        
+    Returns:
+        Converted integer or default
+    """
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    """Convert value to float with fallback default.
+    
+    Args:
+        value: Value to convert (can be float, int, str, or None)
+        default: Default value if conversion fails
+        
+    Returns:
+        Converted float or default
+    """
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_bool(value: Any, default: bool = True) -> bool:
+    """Convert value to boolean with fallback default.
+    
+    Args:
+        value: Value to convert (can be bool, str, or None)
+        default: Default value if conversion fails or value is None
+        
+    Returns:
+        Converted boolean or default
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes", "on")
+    return default
+
+
+def _merge_toml_with_env(config_schema: Config) -> Dict[str, Any]:
+    """Merge parsed configuration schema with environment variables.
+    
+    Environment variables take precedence over TOML values.
+    Converts validated schema object to Settings dictionary.
+    
+    Args:
+        config_schema: Parsed and validated Config dataclass
         
     Returns:
         Merged configuration dictionary suitable for Settings initialization
     """
-    import os
-    
     merged = {}
     
-    # Flatten nested TOML sections into Settings field names
-    # Example: [database] host -> DB_HOST
-    if "database" in toml_config:
-        db_config = toml_config["database"]
-        merged["DB_HOST"] = db_config.get("host", os.getenv("DB_HOST"))
-        merged["DB_PORT"] = db_config.get("port", os.getenv("DB_PORT"))
-        merged["DB_NAME"] = db_config.get("name", os.getenv("DB_NAME"))
-        merged["DB_USER"] = db_config.get("user", os.getenv("DB_USER"))
-        merged["DB_PASSWORD"] = db_config.get("password", os.getenv("DB_PASSWORD"))
-        merged["DB_PASSWORD_FILE"] = db_config.get("password_file", os.getenv("DB_PASSWORD_FILE"))
-        merged["DATABASE_URL"] = db_config.get("url", os.getenv("DATABASE_URL"))
+    # Database configuration
+    merged["DB_HOST"] = config_schema.database.host or os.getenv("DB_HOST") or "localhost"
+    merged["DB_PORT"] = config_schema.database.port or _to_int(os.getenv("DB_PORT"), 5432)
+    merged["DB_NAME"] = config_schema.database.name or os.getenv("DB_NAME") or "segmentflow"
+    merged["DB_USER"] = config_schema.database.user or os.getenv("DB_USER") or "segmentflow"
+    merged["DB_PASSWORD"] = config_schema.database.password or os.getenv("DB_PASSWORD")
+    merged["DB_PASSWORD_FILE"] = config_schema.database.password_file or os.getenv("DB_PASSWORD_FILE")
+    merged["DATABASE_URL"] = config_schema.database.url or os.getenv("DATABASE_URL")
     
     # Processing configuration
-    if "processing" in toml_config:
-        proc_config = toml_config["processing"]
-        merged["MAX_PROPAGATION_LENGTH"] = proc_config.get(
-            "max_propagation_length", os.getenv("MAX_PROPAGATION_LENGTH")
-        )
-        merged["INFERENCE_WIDTH"] = proc_config.get(
-            "inference_width", os.getenv("INFERENCE_WIDTH")
-        )
-        merged["OUTPUT_WIDTH"] = proc_config.get(
-            "output_width", os.getenv("OUTPUT_WIDTH")
-        )
-        merged["MASK_TRANSPARENCY"] = proc_config.get(
-            "mask_transparency", os.getenv("MASK_TRANSPARENCY")
-        )
-        merged["BIG_JUMP_SIZE"] = proc_config.get(
-            "big_jump_size", os.getenv("BIG_JUMP_SIZE")
-        )
+    merged["MAX_PROPAGATION_LENGTH"] = config_schema.processing.max_propagation_length or _to_int(os.getenv("MAX_PROPAGATION_LENGTH"), 1000)
+    merged["INFERENCE_WIDTH"] = config_schema.processing.inference_width or _to_int(os.getenv("INFERENCE_WIDTH"), 1024)
+    merged["OUTPUT_WIDTH"] = config_schema.processing.output_width or _to_int(os.getenv("OUTPUT_WIDTH"), 1920)
+    merged["MASK_TRANSPARENCY"] = config_schema.processing.mask_transparency or _to_float(os.getenv("MASK_TRANSPARENCY"), 0.5)
+    merged["BIG_JUMP_SIZE"] = config_schema.processing.big_jump_size or _to_int(os.getenv("BIG_JUMP_SIZE"), 500)
     
     # Storage configuration
-    if "storage" in toml_config:
-        storage_config = toml_config["storage"]
-        merged["PROJECTS_ROOT_DIR"] = storage_config.get(
-            "projects_root_dir", os.getenv("PROJECTS_ROOT_DIR")
-        )
+    merged["PROJECTS_ROOT_DIR"] = config_schema.storage.projects_root_dir or os.getenv("PROJECTS_ROOT_DIR") or "./data/projects"
     
     # SAM configuration
-    if "sam" in toml_config:
-        sam_config = toml_config["sam"]
-        merged["SAM_MODEL_PATH"] = sam_config.get(
-            "model_path", os.getenv("SAM_MODEL_PATH")
-        )
+    merged["SAM_MODEL_PATH"] = config_schema.sam.model_path or os.getenv("SAM_MODEL_PATH")
     
     # Server configuration
-    if "server" in toml_config:
-        server_config = toml_config["server"]
-        merged["DEBUG"] = server_config.get("debug", os.getenv("DEBUG"))
-        merged["PROJECT_NAME"] = server_config.get("project_name", os.getenv("PROJECT_NAME"))
-        merged["VERSION"] = server_config.get("version", os.getenv("VERSION"))
-        merged["API_V1_STR"] = server_config.get("api_v1_str", os.getenv("API_V1_STR"))
-        
-        if "cors_origins" in server_config:
-            merged["CORS_ORIGINS"] = server_config["cors_origins"]
+    merged["DEBUG"] = _to_bool(config_schema.server.debug or os.getenv("DEBUG"), True)
+    merged["PROJECT_NAME"] = config_schema.server.project_name or os.getenv("PROJECT_NAME") or "SegmentFlow"
+    merged["VERSION"] = config_schema.server.version or os.getenv("VERSION") or "0.1.0"
+    merged["API_V1_STR"] = config_schema.server.api_v1_str or os.getenv("API_V1_STR") or "/api/v1"
+    merged["CORS_ORIGINS"] = config_schema.server.cors_origins or ["http://localhost:3000", "http://localhost:5173"]
     
     # Remove None values to allow Pydantic to use defaults
     return {k: v for k, v in merged.items() if v is not None}
@@ -254,7 +289,7 @@ def _create_settings() -> Settings:
     try:
         toml_config = _load_toml_config()
     except ValueError as e:
-        print(f"✗ Configuration error: {e}", file=sys.stderr)
+        logger.error(f"Configuration error: {e}")
         raise
     
     merged_config = _merge_toml_with_env(toml_config)
@@ -262,12 +297,12 @@ def _create_settings() -> Settings:
     try:
         return Settings(**merged_config)
     except ValidationError as e:
-        print(f"✗ Configuration validation error: {e}", file=sys.stderr)
+        logger.error(f"Configuration validation error: {e}")
         raise
 
 
 try:
     settings = _create_settings()
 except (ValueError, ValidationError) as e:
-    print(f"Failed to load configuration: {e}", file=sys.stderr)
+    logger.error(f"Failed to load configuration: {e}")
     sys.exit(1)

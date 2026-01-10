@@ -28,4 +28,6 @@ mypy==1.19.1
 ruff==0.14.10
 
 # Configuration
-tomli==2.0.1  # TOML support for Python <3.11
+# tomllib is included in python 3.11
+marshmallow==4.2.0  # Data validation and serialization
+dacite==1.9.2  # Dataclass deserialization

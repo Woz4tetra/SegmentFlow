@@ -1,5 +1,6 @@
 """FastAPI main application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -9,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -22,9 +26,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         None during application runtime
     """
     # Startup: Initialize database
+    logger.info("Starting SegmentFlow application")
     await init_db()
+    logger.info("Database initialization complete")
     yield
     # Shutdown: Cleanup resources if needed
+    logger.info("Shutting down SegmentFlow application")
 
 
 app = FastAPI(
