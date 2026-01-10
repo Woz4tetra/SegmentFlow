@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool, StaticPool
+from sqlalchemy.pool import NullPool, Pool, StaticPool
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -36,10 +36,10 @@ _use_sqlite = _is_sqlite(db_url)
 
 # Allow tests to override SQLite pool to NullPool to avoid background threads
 _sqlite_pool_override = os.getenv("SEGMENTFLOW_SQLITE_POOL")
-if _use_sqlite and _sqlite_pool_override == "NullPool":
-    _poolclass = NullPool
-elif _use_sqlite:
-    _poolclass = StaticPool
+# Select appropriate pool class with explicit type annotation for mypy
+_poolclass: type[Pool]
+if _use_sqlite:
+    _poolclass = NullPool if _sqlite_pool_override == "NullPool" else StaticPool
 else:
     _poolclass = NullPool
 
