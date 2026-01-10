@@ -5,7 +5,9 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-docker-compose up -d
+docker-compose down
+
+docker-compose up -d --build
 
 # Rotate the password after services are up so the new secret is applied and backend restarts.
 ./scripts/rotate_db_password.sh

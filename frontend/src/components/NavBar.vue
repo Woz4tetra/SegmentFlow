@@ -27,8 +27,12 @@ const { toggleTheme } = app;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(127,127,127,0.25);
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border, #dfe3ec);
+  background: var(--surface, #ffffff);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+  width: 100%;
 }
 .brand a {
   font-weight: 700;
@@ -45,8 +49,8 @@ const { toggleTheme } = app;
   color: inherit;
 }
 .theme {
-  border: 1px solid rgba(127,127,127,0.4);
-  background: transparent;
+  border: 1px solid var(--border, #dfe3ec);
+  background: var(--surface-muted, #eef2f7);
   border-radius: 6px;
   padding: 0.25rem 0.5rem;
   cursor: pointer;
