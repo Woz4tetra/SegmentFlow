@@ -97,7 +97,9 @@ install_python_environment() {
 
     # Install project dependencies from pyproject.toml
     echo "Installing project dependencies from pyproject.toml..."
-    pip install -e "$PROJECT_ROOT"
+    pushd "$PROJECT_ROOT" >/dev/null
+    pip install -e ".[dev]"
+    popd >/dev/null
 
     echo ""
     echo "=========================================="

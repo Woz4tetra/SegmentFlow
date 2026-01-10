@@ -89,8 +89,8 @@ format_backend_fix() {
         return 1
     fi
     
-    if cd "$BACKEND_DIR" && ruff format .; then
-        print_success "Code format fixed"
+    if cd "$BACKEND_DIR" && ruff check --select I,F401 --fix . && ruff format .; then
+        print_success "Code format, imports, and unused imports fixed"
         cd ..
     else
         print_error "Code format fix failed"

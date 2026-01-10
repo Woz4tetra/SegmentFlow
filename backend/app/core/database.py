@@ -1,6 +1,6 @@
 """Database configuration and session management."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -25,7 +25,7 @@ def _is_sqlite(url: str) -> bool:
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
-    
+
     pass
 
 
@@ -49,10 +49,11 @@ logger.info(f"Using {db_type} database: {db_display}")
 
 # Enable foreign keys for SQLite
 if _use_sqlite:
+
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_conn, connection_record):
         """Enable foreign key support in SQLite.
-        
+
         Args:
             dbapi_conn: Database connection
             connection_record: Connection record
@@ -74,10 +75,10 @@ AsyncSessionLocal = async_sessionmaker(
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Get database session dependency.
-    
+
     Yields:
         AsyncSession: Database session
-        
+
     Example:
         ```python
         @app.get("/items")
@@ -95,7 +96,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database by creating all tables.
-    
+
     Called during application startup.
     """
     logger.info("Initializing database...")

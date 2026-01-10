@@ -1,21 +1,21 @@
 """Project database model."""
 
-from typing import TYPE_CHECKING, Optional
-from uuid import UUID
+from enum import Enum
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, Integer, String
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.label import Label
     from app.models.image import Image
+    from app.models.label import Label
 
 
 class ProjectStage(str, Enum):
     """Project stage enum."""
-    
+
     UPLOAD = "upload"
     TRIM = "trim"
     MANUAL_LABELING = "manual_labeling"
@@ -26,7 +26,7 @@ class ProjectStage(str, Enum):
 
 class Project(BaseModel):
     """Project model for annotation projects.
-    
+
     Attributes:
         name: Project display name
         video_path: Path to uploaded video file
@@ -38,21 +38,21 @@ class Project(BaseModel):
         labels: Related label definitions
         images: Related images/frames
     """
-    
+
     __tablename__ = "projects"
-    
+
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    video_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    trim_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    trim_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    trim_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trim_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stage: Mapped[str] = mapped_column(
         String(50),
-        default=ProjectStage.UPLOAD.value,
+        default=ProjectStage.UPLOAD,
         nullable=False,
     )
-    locked_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
     # Relationships
     labels: Mapped[list["Label"]] = relationship(
         "Label",
@@ -64,10 +64,10 @@ class Project(BaseModel):
         back_populates="project",
         cascade="all, delete-orphan",
     )
-    
+
     def __repr__(self) -> str:
         """Return string representation.
-        
+
         Returns:
             str: Project representation
         """
