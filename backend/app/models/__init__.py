@@ -15,7 +15,6 @@ from app.models.user_settings import Theme, UserSettings
 __all__ = [
     "Image",
     "ImageStatus",
-    "ValidationStatus",
     "Label",
     "LabeledPoint",
     "Mask",
@@ -24,4 +23,5 @@ __all__ = [
     "Stats",
     "Theme",
     "UserSettings",
+    "ValidationStatus",
 ]

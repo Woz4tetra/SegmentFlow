@@ -33,7 +33,7 @@ class Stats(BaseModel):
     time_spent_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     propagation_time_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    project: Mapped["Project"] = relationship("Project", back_populates="stats")
+    project: Mapped[Project] = relationship("Project", back_populates="stats")
     image: Mapped[Image | None] = relationship("Image", back_populates="stats")
 
     def __repr__(self) -> str:

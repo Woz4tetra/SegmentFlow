@@ -81,20 +81,21 @@ format_backend_check() {
     fi
 }
 
-# Backend Code Formatting (fix)
+# Backend Code Formatting and Lint Auto-fix
 format_backend_fix() {
-    print_header "Backend: Auto-fixing Code Format"
+    print_header "Backend: Auto-fixing Lint and Format"
     
     if ! command_exists ruff; then
         print_error "ruff not found"
         return 1
     fi
     
-    if cd "$BACKEND_DIR" && ruff check --select I,F401 --fix . && ruff format .; then
-        print_success "Code format, imports, and unused imports fixed"
+    # --fix covers lint codes (including RUF022, UP037) and import cleanup; format handles spacing
+    if cd "$BACKEND_DIR" && ruff check --fix . && ruff format .; then
+        print_success "Lint and format auto-fix applied"
         cd ..
     else
-        print_error "Code format fix failed"
+        print_error "Lint/format auto-fix failed"
         cd ..
         return 1
     fi
@@ -336,7 +337,7 @@ case "$TARGET" in
         echo "  lint      - Run linting checks only"
         echo "  test      - Run tests only"
         echo "  type      - Run type checking only"
-        echo "  format-fix - Auto-fix code format issues"
+        echo "  format-fix - Auto-fix lint and format issues"
         exit 1
         ;;
 esac
