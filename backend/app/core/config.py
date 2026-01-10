@@ -7,14 +7,14 @@ from typing import List, Optional
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.logging import setup_logging
+from app.core.logging import get_logger
 from app.core.schema import Config
 from app.core.schema import from_dict, to_dict
 
 import tomllib
 
 # Setup logging for this module
-logger = setup_logging(__name__)    
+logger = get_logger(__name__)    
 
 class Settings(BaseSettings):
     """Application settings.

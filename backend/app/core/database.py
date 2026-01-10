@@ -13,9 +13,9 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool, StaticPool
 
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.logging import get_logger
 
-logger = setup_logging(__name__)
+logger = get_logger(__name__)
 
 
 def _is_sqlite(url: str) -> bool:
