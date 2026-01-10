@@ -162,6 +162,7 @@ onMounted(() => {
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
   margin-bottom: 1.25rem;
+  width: 100%;
 }
 
 .hero__text {
@@ -259,12 +260,14 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  width: 100%;
 }
 
 .grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: 1fr;
+  width: 100%;
 }
 
 .project-card {
