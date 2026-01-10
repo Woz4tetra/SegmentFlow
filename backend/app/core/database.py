@@ -13,6 +13,9 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool, StaticPool
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _is_sqlite(url: str) -> bool:
@@ -30,7 +33,6 @@ class Base(DeclarativeBase):
 db_url = settings.get_database_url()
 _use_sqlite = _is_sqlite(db_url)
 
-
 engine: AsyncEngine = create_async_engine(
     db_url,
     echo=settings.DEBUG,
@@ -38,6 +40,11 @@ engine: AsyncEngine = create_async_engine(
     # StaticPool avoids threading issues for in-process SQLite
     poolclass=StaticPool if _use_sqlite else NullPool,
 )
+
+# Log database configuration after engine is created
+db_type = "SQLite" if _use_sqlite else "PostgreSQL"
+db_display = db_url if _use_sqlite else (db_url.split("@")[1] if "@" in db_url else db_url)
+logger.info(f"Using {db_type} database: {db_display}")
 
 
 # Enable foreign keys for SQLite
@@ -91,6 +98,12 @@ async def init_db() -> None:
     
     Called during application startup.
     """
-    async with engine.begin() as conn:
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Initializing database...")
+    try:
+        async with engine.begin() as conn:
+            # Create all tables
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database initialization complete")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise

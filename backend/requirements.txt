@@ -16,9 +16,6 @@ pydantic-settings==2.12.0
 # CORS
 python-multipart==0.0.21
 
-# Environment variables
-python-dotenv==1.2.1
-
 # Testing
 pytest==9.0.2
 pytest-asyncio==1.3.0
@@ -29,3 +26,8 @@ mypy==1.19.1
 
 # Code quality (development)
 ruff==0.14.10
+
+# Configuration
+# tomllib is included in python 3.11
+marshmallow==4.2.0  # Data validation and serialization
+dacite==1.9.2  # Dataclass deserialization

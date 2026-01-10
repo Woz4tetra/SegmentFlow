@@ -1,0 +1,48 @@
+# SegmentFlow Configuration File (TOML format)
+# This is the default configuration for local development
+# Adjust settings as needed for your environment
+
+[server]
+# Application metadata
+project_name = "SegmentFlow"
+version = "0.1.0"
+api_v1_str = "/api/v1"
+debug = true
+
+# CORS configuration - list of allowed origins
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173"
+]
+
+[database]
+# PostgreSQL configuration (comment out to use SQLite)
+# host = "localhost"
+# port = 5432
+# name = "segmentflow"
+# user = "segmentflow"
+# password_file = "/run/secrets/postgres_password"
+
+[storage]
+# Root directory for project files (videos, images, etc.)
+projects_root_dir = "./data/projects"
+
+[processing]
+# Maximum number of frames to propagate in one batch
+max_propagation_length = 1000
+
+# Width for SAM inference images (smaller = faster, less memory)
+inference_width = 1024
+
+# Width for output images
+output_width = 1920
+
+# Transparency level for mask overlays (0.0 = transparent, 1.0 = opaque)
+mask_transparency = 0.5
+
+# Number of frames to jump with 'big jump' navigation (N key)
+big_jump_size = 500
+
+[sam]
+# Path to SAM3 model checkpoint (optional, downloads if not specified)
+# model_path = "/path/to/sam3.pth"
