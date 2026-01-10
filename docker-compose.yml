@@ -37,8 +37,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: segmentflow-backend
     depends_on:
       postgres:
@@ -67,8 +67,8 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: segmentflow-frontend
     depends_on:
       - backend
