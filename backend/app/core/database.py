@@ -27,11 +27,12 @@ class Base(DeclarativeBase):
 
 
 # Create async engine
-_use_sqlite = _is_sqlite(settings.DATABASE_URL)
+db_url = settings.get_database_url()
+_use_sqlite = _is_sqlite(db_url)
 
 
 engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
+    db_url,
     echo=settings.DEBUG,
     future=True,
     # StaticPool avoids threading issues for in-process SQLite
