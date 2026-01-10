@@ -10,6 +10,8 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.labeled_point import LabeledPoint
+    from app.models.mask import Mask
 
 
 class Label(BaseModel):
@@ -36,6 +38,16 @@ class Label(BaseModel):
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="labels")
+    points: Mapped[list["LabeledPoint"]] = relationship(
+        "LabeledPoint",
+        back_populates="label",
+        cascade="all, delete-orphan",
+    )
+    masks: Mapped[list["Mask"]] = relationship(
+        "Mask",
+        back_populates="label",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         """Return string representation.
