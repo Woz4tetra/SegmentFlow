@@ -1,10 +1,12 @@
 <template>
   <div :class="['app', themeClass]">
-    <NavBar />
+    <header class="container container--nav">
+      <NavBar />
+    </header>
     <main class="container">
       <router-view />
     </main>
-  </div>  
+  </div>
 </template>
 
 <script lang="ts" setup>
@@ -23,19 +25,35 @@ const themeClass = computed(() => (theme.value === 'dark' ? 'theme-dark' : 'them
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--bg, #f6f7fb);
+  color: var(--text, #0f172a);
 }
 .container {
-  max-width: 980px;
-  margin: 1rem auto;
-  padding: 0 1rem;
+  max-width: 1180px;
+  margin: 1.25rem auto;
+  padding: 0 1.25rem;
   flex: 1;
 }
+
+.container--nav {
+  margin-bottom: 0.75rem;
+}
 .theme-light {
-  background: #f6f7fb;
-  color: #1a1a1a;
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-muted: #eef2f7;
+  --border: #dfe3ec;
+  --text: #0f172a;
+  --muted: #4b5563;
+  --pill: #e2e8f0;
 }
 .theme-dark {
-  background: #0f1115;
-  color: #e6e6e6;
+  --bg: #0d111a;
+  --surface: #101524;
+  --surface-muted: #151b2b;
+  --border: #1e2535;
+  --text: #e8edf5;
+  --muted: #9aa3b5;
+  --pill: #1f2937;
 }
 </style>
