@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: segmentflow-postgres
+    environment:
+      POSTGRES_DB: segmentflow
+      POSTGRES_USER: segmentflow
+      POSTGRES_PASSWORD: segmentflow_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U segmentflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - segmentflow-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: segmentflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - segmentflow-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: segmentflow-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://segmentflow:segmentflow_dev_password@postgres:5432/segmentflow
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      DEBUG: "True"
+      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "http://frontend:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - segmentflow-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: segmentflow-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://backend:8000/api/v1
+    ports:
+      - "5173:5173"
+    networks:
+      - segmentflow-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  segmentflow-network:
+    driver: bridge
