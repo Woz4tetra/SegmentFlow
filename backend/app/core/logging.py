@@ -47,7 +47,12 @@ def setup_logging(name: str = "segmentflow", level: int = logging.INFO) -> loggi
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Get or create a logger instance.
+    """Get or create a configured logger instance.
+    
+    Ensures the returned logger has the same configuration as produced by
+    setup_logging(). If the logger has not yet been configured (no handlers),
+    it will be configured via setup_logging; otherwise, the existing
+    configuration is preserved.
     
     Args:
         name: Logger name (typically __name__)
@@ -55,4 +60,8 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    # If no handlers are attached, configure this logger
+    if not logger.handlers:
+        return setup_logging(name=name)
+    return logger
