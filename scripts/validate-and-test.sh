@@ -14,8 +14,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-BACKEND_DIR="backend"
-FRONTEND_DIR="frontend"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="${SCRIPT_DIR}/../backend"
+FRONTEND_DIR="${SCRIPT_DIR}/../frontend"
 TARGET="${1:-all}"
 FAILED=0
 PASSED=0

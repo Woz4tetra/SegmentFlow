@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.core.database import init_db
+import inspect
+
+from app.core.database import init_db, engine
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +33,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     yield
     # Shutdown: Cleanup resources if needed
     logger.info("Shutting down SegmentFlow application")
+    # Dispose database engine to ensure background threads are closed
+    try:
+        dispose_result = engine.dispose()
+        if inspect.isawaitable(dispose_result):
+            await dispose_result
+        logger.info("Database engine disposed")
+    except Exception as e:
+        logger.warning(f"Error disposing database engine: {e}")
 
 
 app = FastAPI(

@@ -1,23 +1,28 @@
 """Test configuration and fixtures."""
 
-import asyncio
+from collections.abc import AsyncIterator
+import os
 
-import pytest
-from httpx import AsyncClient
-
-from app.main import app
-
-
-@pytest.fixture
-def event_loop():
-    """Create an instance of the default event loop for each test case."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from asgi_lifespan import LifespanManager
 
 
-@pytest.fixture
-async def client():
-    """Provide an AsyncClient for testing."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
+@pytest_asyncio.fixture
+async def client() -> AsyncIterator[AsyncClient]:
+    """Provide an AsyncClient for testing.
+
+    - Forces SQLite to use NullPool in tests to avoid background threads.
+    - Wraps the app in LifespanManager to guarantee startup/shutdown.
+    - Ensures ASGITransport closes cleanly to avoid event-loop/thread hangs.
+    """
+    os.environ.setdefault("SEGMENTFLOW_SQLITE_POOL", "NullPool")
+
+    from app.main import app
+
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+        # Explicitly close transport to trigger FastAPI shutdown and release resources
+        await transport.aclose()

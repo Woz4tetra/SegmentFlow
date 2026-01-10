@@ -1,6 +1,7 @@
 """Database configuration and session management."""
 
 from collections.abc import AsyncGenerator
+import os
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -33,12 +34,20 @@ class Base(DeclarativeBase):
 db_url = settings.get_database_url()
 _use_sqlite = _is_sqlite(db_url)
 
+# Allow tests to override SQLite pool to NullPool to avoid background threads
+_sqlite_pool_override = os.getenv("SEGMENTFLOW_SQLITE_POOL")
+if _use_sqlite and _sqlite_pool_override == "NullPool":
+    _poolclass = NullPool
+elif _use_sqlite:
+    _poolclass = StaticPool
+else:
+    _poolclass = NullPool
+
 engine: AsyncEngine = create_async_engine(
     db_url,
     echo=settings.DEBUG,
     future=True,
-    # StaticPool avoids threading issues for in-process SQLite
-    poolclass=StaticPool if _use_sqlite else NullPool,
+    poolclass=_poolclass,
 )
 
 # Log database configuration after engine is created
