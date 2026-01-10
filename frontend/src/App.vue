@@ -30,9 +30,11 @@ const themeClass = computed(() => (theme.value === 'dark' ? 'theme-dark' : 'them
 }
 .container {
   max-width: 1180px;
+  width: 100%;
   margin: 1.25rem auto;
   padding: 0 1.25rem;
-  flex: 1;
+  display: grid;
+  place-items: start center;
 }
 
 .container--nav {
