@@ -13,15 +13,15 @@ from app.models.stats import Stats
 from app.models.user_settings import Theme, UserSettings
 
 __all__ = [
-	"Image",
-	"ImageStatus",
-	"ValidationStatus",
-	"Label",
-	"LabeledPoint",
-	"Mask",
-	"Project",
-	"ProjectStage",
-	"Stats",
-	"Theme",
-	"UserSettings",
+    "Image",
+    "ImageStatus",
+    "ValidationStatus",
+    "Label",
+    "LabeledPoint",
+    "Mask",
+    "Project",
+    "ProjectStage",
+    "Stats",
+    "Theme",
+    "UserSettings",
 ]

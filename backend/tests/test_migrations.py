@@ -27,8 +27,7 @@ def _expected_tables() -> set[str]:
 def _has_fk(inspector, table: str, column: str, target: str) -> bool:
     fks = inspector.get_foreign_keys(table)
     return any(
-        column in fk.get("constrained_columns", [])
-        and fk.get("referred_table") == target
+        column in fk.get("constrained_columns", []) and fk.get("referred_table") == target
         for fk in fks
     )
 

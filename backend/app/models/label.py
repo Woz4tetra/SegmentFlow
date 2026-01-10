@@ -9,9 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.project import Project
     from app.models.labeled_point import LabeledPoint
     from app.models.mask import Mask
+    from app.models.project import Project
 
 
 class Label(BaseModel):

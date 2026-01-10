@@ -28,6 +28,7 @@ async def test_schema_tables_and_fks_created() -> None:
     """Ensure all planned tables and their foreign keys are created."""
 
     async with engine.begin() as conn:
+
         def _assert_schema(sync_conn) -> None:
             inspector = inspect(sync_conn)
 
