@@ -1,16 +1,14 @@
 """Application configuration settings."""
 
 import sys
-from pathlib import Path
-from typing import List, Optional
 import tomllib
+from pathlib import Path
 
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.logging import get_logger
-from app.core.schema import Config
-from app.core.schema import from_dict, to_dict
+from app.core.schema import Config, from_dict, to_dict
 
 # Setup logging for this module
 logger = get_logger(__name__)
@@ -36,7 +34,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # Database configuration
-    DATABASE_URL: Optional[str] = Field(
+    DATABASE_URL: str | None = Field(
         default=None,
         description=(
             "Complete database URL. If not provided, it will be assembled from DB_* settings."
@@ -46,14 +44,14 @@ class Settings(BaseSettings):
     DB_PORT: int = Field(default=5432, description="Database port")
     DB_NAME: str = Field(default="segmentflow", description="Database name")
     DB_USER: str = Field(default="segmentflow", description="Database user")
-    DB_PASSWORD: Optional[str] = Field(default=None, description="Database password")
-    DB_PASSWORD_FILE: Optional[str] = Field(
+    DB_PASSWORD: str | None = Field(default=None, description="Database password")
+    DB_PASSWORD_FILE: str | None = Field(
         default=None,
         description="Path to file containing database password (e.g., /run/secrets/postgres_password)",
     )
 
     # CORS configuration
-    CORS_ORIGINS: List[str] = Field(
+    CORS_ORIGINS: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:5173"],
         description="Allowed CORS origins for frontend",
     )
@@ -71,9 +69,9 @@ class Settings(BaseSettings):
         password = self.DB_PASSWORD
         if self.DB_PASSWORD_FILE:
             try:
-                with open(self.DB_PASSWORD_FILE, "r", encoding="utf-8") as f:
+                with open(self.DB_PASSWORD_FILE, encoding="utf-8") as f:
                     password = f.read().strip()
-            except (FileNotFoundError, OSError, IOError):
+            except OSError:
                 # Fall back to provided DB_PASSWORD or empty
                 pass
 
@@ -93,7 +91,7 @@ class Settings(BaseSettings):
     )
 
     # SAM configuration
-    SAM_MODEL_PATH: Optional[str] = Field(
+    SAM_MODEL_PATH: str | None = Field(
         default=None,
         description="Path to SAM model checkpoint",
     )
@@ -151,9 +149,7 @@ def _load_toml_config() -> Config:
                 # Validate TOML structure using schema
                 try:
                     config = from_dict(Config, toml_data)
-                    logger.info(
-                        f"Loaded and validated configuration from {config_path}"
-                    )
+                    logger.info(f"Loaded and validated configuration from {config_path}")
                     return config
                 except Exception as e:
                     raise ValueError(f"Configuration validation failed: {e}") from e
