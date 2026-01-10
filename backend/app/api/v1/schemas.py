@@ -118,3 +118,67 @@ class ProjectListResponse(BaseModel):
 
     projects: list[ProjectResponse] = Field(..., description="List of projects")
     total: int = Field(..., description="Total number of projects")
+
+
+# ===== Label Schemas =====
+
+
+class LabelBase(BaseModel):
+    """Base schema for Label with common fields."""
+
+    name: str = Field(..., min_length=1, max_length=100, description="Label name")
+    color_hex: str = Field(..., description="Color in #RRGGBB format")
+    thumbnail_path: str | None = Field(default=None, description="Optional path to label thumbnail")
+
+    @field_validator("color_hex")
+    @classmethod
+    def validate_color_hex(cls, v: str) -> str:
+        """Validate color hex is in #RRGGBB format."""
+        if not isinstance(v, str):
+            raise ValueError("color_hex must be a string")
+        if len(v) != 7 or not v.startswith("#"):
+            raise ValueError("color_hex must be in format #RRGGBB")
+        hex_part = v[1:]
+        try:
+            int(hex_part, 16)
+        except ValueError as e:
+            raise ValueError("color_hex must contain valid hex digits") from e
+        return v
+
+
+class LabelCreate(LabelBase):
+    """Schema for creating a new label."""
+
+    pass
+
+
+class LabelUpdate(BaseModel):
+    """Schema for updating an existing label (partial)."""
+
+    name: str | None = Field(None, min_length=1, max_length=100)
+    color_hex: str | None = Field(None, description="Color in #RRGGBB format")
+    thumbnail_path: str | None = Field(None, description="Path to thumbnail image")
+
+    @field_validator("color_hex")
+    @classmethod
+    def validate_color_hex_optional(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if len(v) != 7 or not v.startswith("#"):
+            raise ValueError("color_hex must be in format #RRGGBB")
+        try:
+            int(v[1:], 16)
+        except ValueError as e:
+            raise ValueError("color_hex must contain valid hex digits") from e
+        return v
+
+
+class LabelResponse(LabelBase):
+    """Schema for label response."""
+
+    id: UUID
+    project_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
