@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import List, Type, TypeVar
 
 from dacite import Config as DaciteConfig
 from dacite import from_dict as from_dict_dacite
@@ -79,9 +79,9 @@ class DatabaseConfig:
     port: int = 5432
     name: str = "segmentflow"
     user: str = "segmentflow"
-    password: Optional[str] = None
-    password_file: Optional[str] = None
-    url: Optional[str] = None
+    password: str = ''
+    password_file: str = ''
+    url: str = ''
 
 
 @dataclass
@@ -142,7 +142,7 @@ class SamConfig:
     Attributes:
         model_path: Path to SAM model checkpoint (optional, downloads if not specified)
     """
-    model_path: Optional[str] = None
+    model_path: str = ''
 
 
 @dataclass

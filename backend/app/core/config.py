@@ -1,16 +1,15 @@
 """Application configuration settings."""
 
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.logging import setup_logging
 from app.core.schema import Config
-from app.core.schema import from_dict
+from app.core.schema import from_dict, to_dict
 
 import tomllib
 
@@ -169,112 +168,6 @@ def _load_toml_config() -> Config:
     return Config()
 
 
-def _to_int(value: Any, default: int = 0) -> int:
-    """Convert value to integer with fallback default.
-    
-    Args:
-        value: Value to convert (can be int, str, or None)
-        default: Default value if conversion fails
-        
-    Returns:
-        Converted integer or default
-    """
-    if value is None:
-        return default
-    if isinstance(value, int):
-        return value
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        return default
-
-
-def _to_float(value: Any, default: float = 0.0) -> float:
-    """Convert value to float with fallback default.
-    
-    Args:
-        value: Value to convert (can be float, int, str, or None)
-        default: Default value if conversion fails
-        
-    Returns:
-        Converted float or default
-    """
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
-
-
-def _to_bool(value: Any, default: bool = True) -> bool:
-    """Convert value to boolean with fallback default.
-    
-    Args:
-        value: Value to convert (can be bool, str, or None)
-        default: Default value if conversion fails or value is None
-        
-    Returns:
-        Converted boolean or default
-    """
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.lower() in ("true", "1", "yes", "on")
-    return default
-
-
-def _merge_toml_with_env(config_schema: Config) -> Dict[str, Any]:
-    """Merge parsed configuration schema with environment variables.
-    
-    Environment variables take precedence over TOML values.
-    Converts validated schema object to Settings dictionary.
-    
-    Args:
-        config_schema: Parsed and validated Config dataclass
-        
-    Returns:
-        Merged configuration dictionary suitable for Settings initialization
-    """
-    merged = {}
-    
-    # Database configuration
-    merged["DB_HOST"] = config_schema.database.host or os.getenv("DB_HOST") or "localhost"
-    merged["DB_PORT"] = config_schema.database.port or _to_int(os.getenv("DB_PORT"), 5432)
-    merged["DB_NAME"] = config_schema.database.name or os.getenv("DB_NAME") or "segmentflow"
-    merged["DB_USER"] = config_schema.database.user or os.getenv("DB_USER") or "segmentflow"
-    merged["DB_PASSWORD"] = config_schema.database.password or os.getenv("DB_PASSWORD")
-    merged["DB_PASSWORD_FILE"] = config_schema.database.password_file or os.getenv("DB_PASSWORD_FILE")
-    merged["DATABASE_URL"] = config_schema.database.url or os.getenv("DATABASE_URL")
-    
-    # Processing configuration
-    merged["MAX_PROPAGATION_LENGTH"] = config_schema.processing.max_propagation_length or _to_int(os.getenv("MAX_PROPAGATION_LENGTH"), 1000)
-    merged["INFERENCE_WIDTH"] = config_schema.processing.inference_width or _to_int(os.getenv("INFERENCE_WIDTH"), 1024)
-    merged["OUTPUT_WIDTH"] = config_schema.processing.output_width or _to_int(os.getenv("OUTPUT_WIDTH"), 1920)
-    merged["MASK_TRANSPARENCY"] = config_schema.processing.mask_transparency or _to_float(os.getenv("MASK_TRANSPARENCY"), 0.5)
-    merged["BIG_JUMP_SIZE"] = config_schema.processing.big_jump_size or _to_int(os.getenv("BIG_JUMP_SIZE"), 500)
-    
-    # Storage configuration
-    merged["PROJECTS_ROOT_DIR"] = config_schema.storage.projects_root_dir or os.getenv("PROJECTS_ROOT_DIR") or "./data/projects"
-    
-    # SAM configuration
-    merged["SAM_MODEL_PATH"] = config_schema.sam.model_path or os.getenv("SAM_MODEL_PATH")
-    
-    # Server configuration
-    merged["DEBUG"] = _to_bool(config_schema.server.debug or os.getenv("DEBUG"), True)
-    merged["PROJECT_NAME"] = config_schema.server.project_name or os.getenv("PROJECT_NAME") or "SegmentFlow"
-    merged["VERSION"] = config_schema.server.version or os.getenv("VERSION") or "0.1.0"
-    merged["API_V1_STR"] = config_schema.server.api_v1_str or os.getenv("API_V1_STR") or "/api/v1"
-    merged["CORS_ORIGINS"] = config_schema.server.cors_origins or ["http://localhost:3000", "http://localhost:5173"]
-    
-    # Remove None values to allow Pydantic to use defaults
-    return {k: v for k, v in merged.items() if v is not None}
-
-
 def _create_settings() -> Settings:
     """Create Settings instance with TOML and environment configuration.
     
@@ -291,11 +184,9 @@ def _create_settings() -> Settings:
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         raise
-    
-    merged_config = _merge_toml_with_env(toml_config)
-    
+
     try:
-        return Settings(**merged_config)
+        return Settings(**to_dict(toml_config))
     except ValidationError as e:
         logger.error(f"Configuration validation error: {e}")
         raise
