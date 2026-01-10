@@ -118,7 +118,7 @@ addopts = [
     "--cov=app",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=html",
-    "--cov-fail-under=70",
+    "--cov-fail-under=80",
 ]
 markers = [
     "asyncio: marks tests as async",
