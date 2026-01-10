@@ -62,7 +62,7 @@ class Settings(BaseSettings):
             try:
                 with open(self.DB_PASSWORD_FILE, "r", encoding="utf-8") as f:
                     password = f.read().strip()
-            except FileNotFoundError:
+            except (FileNotFoundError, OSError, IOError):
                 # Fall back to provided DB_PASSWORD or empty
                 pass
 

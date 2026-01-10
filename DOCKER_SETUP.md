@@ -35,7 +35,7 @@ This docker-compose configuration provides a complete local development environm
 
 ```bash
 # Navigate to project root
-cd /home/ben/SegmentFlow
+cd SegmentFlow
 
 # Build and start all services in the background
 docker-compose up -d
@@ -343,8 +343,13 @@ docker-compose ps postgres
 # Check backend logs
 docker-compose logs backend
 
-# Verify DATABASE_URL in backend service (docker-compose.yml)
-# Should be: postgresql+asyncpg://segmentflow:segmentflow_dev_password@postgres:5432/segmentflow
+# Verify database environment variables in backend service (docker-compose.yml)
+# For example:
+#   DB_HOST=postgres
+#   DB_PORT=5432
+#   DB_NAME=segmentflow
+#   DB_USER=segmentflow
+#   DB_PASSWORD_FILE=/run/secrets/db_password
 
 # Test connection from backend container
 docker-compose exec backend python -c "import asyncio; from app.core.database import engine; asyncio.run(engine.connect())"
