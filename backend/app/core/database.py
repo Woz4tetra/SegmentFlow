@@ -1,7 +1,7 @@
 """Database configuration and session management."""
 
-from collections.abc import AsyncGenerator
 import os
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (

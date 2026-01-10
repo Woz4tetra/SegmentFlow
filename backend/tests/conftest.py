@@ -1,11 +1,11 @@
 """Test configuration and fixtures."""
 
-from collections.abc import AsyncIterator
 import os
+from collections.abc import AsyncIterator
 
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 from asgi_lifespan import LifespanManager
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest_asyncio.fixture

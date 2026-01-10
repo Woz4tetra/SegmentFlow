@@ -1,5 +1,6 @@
 """FastAPI main application entry point."""
 
+import inspect
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -8,9 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
 from app.core.config import settings
-import inspect
-
-from app.core.database import init_db, engine
+from app.core.database import engine, init_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
