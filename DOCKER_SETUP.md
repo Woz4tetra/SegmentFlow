@@ -99,7 +99,9 @@ segmentflow-frontend       segmentflow-frontend      Up (healthy)
 
 **Image**: Built from `backend/Dockerfile`  
 **Environment Variables**:
-- `DATABASE_URL`: PostgreSQL async connection string
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`
+- `DB_PASSWORD_FILE`: Path to the DB password secret (`/run/secrets/postgres_password`)
+- `DATABASE_URL`: Optional override; if absent, assembled from the above
 - `REDIS_URL`: Redis connection URL
 - `ENVIRONMENT`: Set to `development`
 - `DEBUG`: Set to `True`
@@ -109,6 +111,7 @@ segmentflow-frontend       segmentflow-frontend      Up (healthy)
 - Auto-reload enabled for development (source code at `./backend` is volume-mounted)
 - Hot-reloading on file changes
 - Connects to PostgreSQL and Redis services
+- Uses a Docker secret for the DB password (no plaintext in compose)
 
 ### Frontend Service
 
@@ -119,7 +122,7 @@ segmentflow-frontend       segmentflow-frontend      Up (healthy)
 **Features**:
 - Built with Vite for fast development
 - Served with `serve` package in production mode
-- Source code at `./frontend` is volume-mounted for HMR (Hot Module Replacement)
+- For HMR, run locally via `npm run dev` (Workflow 2)
 
 ## Development Workflows
 
@@ -227,6 +230,30 @@ docker-compose exec postgres psql -U segmentflow -d segmentflow
 
 # Via local psql (if installed)
 psql postgresql://segmentflow:segmentflow_dev_password@localhost:5432/segmentflow
+```
+
+### Rotate the database password (non-destructive)
+
+Use the helper script to generate a new strong password, apply it to Postgres, and restart the backend:
+
+```bash
+./scripts/rotate_db_password.sh
+
+# Verify backend health after rotation
+curl -s http://localhost:8000/api/v1/health
+```
+
+What the script does:
+- Generates a new 48-char alphanumeric password and writes `secrets/postgres_password.txt`
+- Executes `ALTER ROLE segmentflow WITH PASSWORD '<new>'` inside Postgres
+- Restarts the backend so it reads the updated secret
+
+If you want to reset everything (data loss):
+
+```bash
+docker-compose down -v
+./scripts/rotate_db_password.sh
+docker-compose up -d --build
 ```
 
 ### Access Redis

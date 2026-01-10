@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: segmentflow
       POSTGRES_USER: segmentflow
-      POSTGRES_PASSWORD: segmentflow_dev_password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     ports:
       - "5432:5432"
     volumes:
@@ -17,6 +17,8 @@ services:
       retries: 5
     networks:
       - segmentflow-network
+    secrets:
+      - postgres_password
 
   redis:
     image: redis:7-alpine
@@ -44,7 +46,11 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://segmentflow:segmentflow_dev_password@postgres:5432/segmentflow
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: segmentflow
+      DB_USER: segmentflow
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
       REDIS_URL: redis://redis:6379/0
       ENVIRONMENT: development
       DEBUG: "True"
@@ -55,6 +61,8 @@ services:
       - ./backend:/app
     networks:
       - segmentflow-network
+    secrets:
+      - postgres_password
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -78,3 +86,7 @@ volumes:
 networks:
   segmentflow-network:
     driver: bridge
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
