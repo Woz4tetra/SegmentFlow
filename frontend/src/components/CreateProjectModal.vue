@@ -17,10 +17,6 @@
             minlength="1"
           />
         </label>
-        <label class="field field--inline">
-          <input type="checkbox" v-model="active" :disabled="submitting" />
-          <span>Active</span>
-        </label>
 
         <p v-if="error" class="error" role="alert">{{ error }}</p>
       </form>
@@ -73,7 +69,7 @@ async function submit() {
   error.value = '';
   submitting.value = true;
   try {
-    emit('submit', { name: name.value, active: active.value });
+    emit('submit', { name: name.value, active: true });
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to create project';
   } finally {
