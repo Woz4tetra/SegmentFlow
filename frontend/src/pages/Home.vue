@@ -4,8 +4,7 @@
       <p class="eyebrow">Projects</p>
       <h1>Annotation Projects</h1>
       <p class="lede">
-        Browse every labeling project, monitor its stage, and jump back into work fast. UI-001 delivers the
-        grid-first home view the team can build on.
+        Create a new project and upload a video, or upload a video to an existing project to continue annotation.
       </p>
       <div class="hero__meta">
         <span class="pill">{{ total }} projects</span>
@@ -16,8 +15,8 @@
       <button class="ghost" type="button" :disabled="loading" @click="handleRefresh">
         {{ loading ? 'Refreshing...' : 'Refresh' }}
       </button>
-      <button class="primary" type="button" disabled>
-        New Project (coming soon)
+      <button class="primary" type="button" @click="handleCreateProject">
+        + New Project
       </button>
     </div>
   </section>
@@ -42,16 +41,28 @@
     <div v-else-if="!orderedProjects.length" class="empty">
       <div>
         <p class="empty__title">No projects yet</p>
-        <p class="empty__body">Create a project to start annotating videos. You will see it appear here instantly.</p>
-        <button class="primary" type="button" disabled>Create Project</button>
+        <p class="empty__body">Click "New Project" to create your first project, then upload a video to begin annotation.</p>
       </div>
     </div>
 
     <div v-else class="grid">
-      <article v-for="project in orderedProjects" :key="project.id" class="project-card">
+      <article
+        v-for="project in orderedProjects"
+        :key="project.id"
+        class="project-card"
+        :data-available="isStageAvailable(project.stage)"
+        role="button"
+        tabindex="0"
+        :title="isStageAvailable(project.stage) ? 'Open editor' : 'Editor coming soon for this stage'"
+        @click="goToStage(project)"
+        @keydown.enter="goToStage(project)"
+      >
         <div class="thumb" :style="gradientStyle(project)">
           <div class="thumb__top">
-            <span class="stage" :data-tone="toneForStage(project.stage)">
+            <span
+              class="stage"
+              :data-tone="toneForStage(project.stage)"
+            >
               {{ labelForStage(project.stage) }}
             </span>
             <span class="status" :data-active="project.active">
@@ -59,7 +70,6 @@
             </span>
           </div>
           <div class="thumb__name">{{ project.name }}</div>
-          <p class="thumb__id">{{ shortId(project.id) }}</p>
         </div>
 
         <div class="meta">
@@ -82,14 +92,16 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
+import { useRouter } from 'vue-router';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
 const { fetchProjects } = projectsStore;
+const router = useRouter();
 
 const stageMeta: Record<ProjectStage, { label: string; tone: 'info' | 'warn' | 'success' | 'accent' }> = {
   upload: { label: 'Stage 1 / Upload', tone: 'accent' },
@@ -116,7 +128,8 @@ const orderedProjects = computed<Project[]>(() =>
   ),
 );
 
-const formatDate = (value: string): string => {
+const formatDate = (value?: string): string => {
+  if (!value) return '—';
   const date = new Date(value);
   return new Intl.DateTimeFormat('en', {
     dateStyle: 'medium',
@@ -124,24 +137,43 @@ const formatDate = (value: string): string => {
   }).format(date);
 };
 
-const hashSeed = (seed: string): number => {
-  return seed.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+const hashSeed = (seed?: string): number => {
+  const s = (seed ?? 'segmentflow').toString();
+  return s.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
 };
 
 const gradientStyle = (project: Project) => {
-  const seed = project.id || project.name;
+  const seed = project?.id ?? project?.name ?? 'segmentflow';
   const idx = Math.abs(hashSeed(seed)) % palette.length;
   const [from, to] = palette[idx];
   return { background: `linear-gradient(135deg, ${from}, ${to})` };
 };
 
-const shortId = (id: string): string => `ID: ${id.slice(0, 8)}`;
-
 const labelForStage = (stage: ProjectStage): string => stageMeta[stage]?.label ?? 'Unknown stage';
 const toneForStage = (stage: ProjectStage): string => stageMeta[stage]?.tone ?? 'info';
 
+const isStageAvailable = (stage: ProjectStage): boolean => stage === 'upload';
+
+const routeForProject = (project: Project) => {
+  if (project.stage === 'upload' && project.id) {
+    return { name: 'Upload', params: { id: project.id } };
+  }
+  return null;
+};
+
+const goToStage = (project: Project) => {
+  const route = routeForProject(project);
+  if (route) {
+    router.push(route);
+  }
+};
+
 const handleRefresh = async () => {
   await fetchProjects();
+};
+
+const handleCreateProject = () => {
+  router.push({ name: 'Upload', params: { id: 'new' } });
 };
 
 onMounted(() => {
@@ -280,6 +312,15 @@ h1 {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
 }
 
+.project-card[data-available='true'] {
+  cursor: pointer;
+}
+
+.project-card[data-available='true']:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.08);
+}
+
 .project-card--skeleton {
   border-style: dashed;
   border-color: var(--border, #dfe3ec);
@@ -308,6 +349,7 @@ h1 {
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.4);
 }
+
 
 .stage[data-tone='warn'] {
   background: rgba(255, 163, 64, 0.22);
