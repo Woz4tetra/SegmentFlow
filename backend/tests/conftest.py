@@ -53,7 +53,6 @@ async def clean_db() -> AsyncIterator[None]:
         await conn.execute(delete(Image))
         await conn.execute(delete(Label))
         await conn.execute(delete(Project))
-        await conn.commit()
 
     yield
 
@@ -65,4 +64,3 @@ async def clean_db() -> AsyncIterator[None]:
         await conn.execute(delete(Image))
         await conn.execute(delete(Label))
         await conn.execute(delete(Project))
-        await conn.commit()
