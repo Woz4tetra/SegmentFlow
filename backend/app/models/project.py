@@ -11,6 +11,7 @@ from app.models.base import BaseModel
 if TYPE_CHECKING:
     from app.models.image import Image
     from app.models.label import Label
+    from app.models.stats import Stats
 
 
 class ProjectStage(str, Enum):
@@ -61,6 +62,11 @@ class Project(BaseModel):
     )
     images: Mapped[list["Image"]] = relationship(
         "Image",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    stats: Mapped[list["Stats"]] = relationship(
+        "Stats",
         back_populates="project",
         cascade="all, delete-orphan",
     )

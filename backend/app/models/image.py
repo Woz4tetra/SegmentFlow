@@ -10,7 +10,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
+    from app.models.labeled_point import LabeledPoint
+    from app.models.mask import Mask
     from app.models.project import Project
+    from app.models.stats import Stats
 
 
 class ImageStatus(str, Enum):
@@ -67,6 +70,21 @@ class Image(BaseModel):
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="images")
+    points: Mapped[list["LabeledPoint"]] = relationship(
+        "LabeledPoint",
+        back_populates="image",
+        cascade="all, delete-orphan",
+    )
+    masks: Mapped[list["Mask"]] = relationship(
+        "Mask",
+        back_populates="image",
+        cascade="all, delete-orphan",
+    )
+    stats: Mapped[list["Stats"]] = relationship(
+        "Stats",
+        back_populates="image",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         """Return string representation.

@@ -110,6 +110,9 @@ async def init_db() -> None:
     """
     logger.info("Initializing database...")
     try:
+        # Import models to ensure all metadata is registered before create_all
+        from app import models  # noqa: F401
+
         async with engine.begin() as conn:
             # Create all tables
             await conn.run_sync(Base.metadata.create_all)
