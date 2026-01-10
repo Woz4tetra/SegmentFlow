@@ -16,9 +16,11 @@
     </div>
   </section>
 
-  <!-- Main settings card: full-width like Home hero card -->
+  <!-- Main settings cards -->
   <section class="content">
+    <!-- Theme Settings -->
     <div class="settings-card">
+      <h2 class="section-title">Theme</h2>
       <div class="settings-row">
         <label class="field field--inline">
           <input type="checkbox" :checked="theme === 'dark'" @change="toggleTheme" />
@@ -27,16 +29,78 @@
         <p class="muted">Current: <strong>{{ theme }}</strong></p>
       </div>
     </div>
+
+    <!-- Column Visibility Settings -->
+    <div class="settings-card">
+      <h2 class="section-title">Project Card Columns</h2>
+      <p class="section-description">
+        Choose which metadata columns to display on project cards in the main view.
+      </p>
+      
+      <div class="settings-group">
+        <div class="settings-row">
+          <label class="field field--inline">
+            <input 
+              type="checkbox" 
+              :checked="visible_columns.created" 
+              @change="handleColumnToggle('created')"
+            />
+            <span>Created Date</span>
+          </label>
+          <p class="muted">Show when each project was created</p>
+        </div>
+
+        <div class="settings-row">
+          <label class="field field--inline">
+            <input 
+              type="checkbox" 
+              :checked="visible_columns.updated" 
+              @change="handleColumnToggle('updated')"
+            />
+            <span>Updated Date</span>
+          </label>
+          <p class="muted">Show when each project was last modified</p>
+        </div>
+
+        <div class="settings-row">
+          <label class="field field--inline">
+            <input 
+              type="checkbox" 
+              :checked="visible_columns.video" 
+              @change="handleColumnToggle('video')"
+            />
+            <span>Video Path</span>
+          </label>
+          <p class="muted">Show the path to the project's video file</p>
+        </div>
+      </div>
+
+      <div class="settings-footer">
+        <button class="ghost" type="button" @click="resetSettings">
+          Reset to Defaults
+        </button>
+      </div>
+    </div>
   </section>
 </template>
 
 <script lang="ts" setup>
 import { storeToRefs } from 'pinia';
-import { useAppStore } from '../stores/app';
+import { useUserSettingsStore, type ColumnVisibility } from '../stores/userSettings';
 
-const app = useAppStore();
-const { theme } = storeToRefs(app);
-const { toggleTheme } = app;
+const userSettings = useUserSettingsStore();
+const { theme, visible_columns } = storeToRefs(userSettings);
+const { toggleTheme, toggleColumnVisibility, resetToDefaults } = userSettings;
+
+const handleColumnToggle = (column: keyof ColumnVisibility) => {
+  toggleColumnVisibility(column);
+};
+
+const resetSettings = () => {
+  if (confirm('Reset all settings to defaults?')) {
+    resetToDefaults();
+  }
+};
 </script>
 
 <style scoped>
@@ -76,20 +140,92 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   border-radius: 12px;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.content { width: 100%; }
+.ghost:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.content { 
+  width: 100%; 
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .settings-card {
   width: 100%;
   border: 1px solid var(--border, #dfe3ec);
   border-radius: 16px;
-  padding: 1rem 1.25rem;
+  padding: 1.25rem 1.5rem;
   background: var(--surface, #ffffff);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
 }
-.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.field { display: flex; gap: 0.5rem; align-items: center; }
-.muted { color: var(--muted, #4b5563); }
+
+.section-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text, #0f172a);
+}
+
+.section-description {
+  margin: 0 0 1rem;
+  color: var(--muted, #4b5563);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.settings-row { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between; 
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.field { 
+  display: flex; 
+  gap: 0.6rem; 
+  align-items: center;
+  cursor: pointer;
+}
+
+.field--inline {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #2563eb;
+}
+
+.muted { 
+  color: var(--muted, #4b5563);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border, #dfe3ec);
+}
 
 @media (max-width: 900px) {
   .hero { flex-direction: column; }

@@ -73,15 +73,15 @@
         </div>
 
         <div class="meta">
-          <div class="meta__row">
+          <div v-if="visible_columns.created" class="meta__row">
             <span>Created</span>
             <strong>{{ formatDate(project.created_at) }}</strong>
           </div>
-          <div class="meta__row">
+          <div v-if="visible_columns.updated" class="meta__row">
             <span>Updated</span>
             <strong>{{ formatDate(project.updated_at) }}</strong>
           </div>
-          <div v-if="project.video_path" class="meta__row" title="Video path">
+          <div v-if="visible_columns.video && project.video_path" class="meta__row" title="Video path">
             <span>Video</span>
             <strong class="truncate">{{ project.video_path }}</strong>
           </div>
@@ -96,11 +96,16 @@ import { computed, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
+import { useUserSettingsStore } from '../stores/userSettings';
 import { useRouter } from 'vue-router';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
 const { fetchProjects } = projectsStore;
+
+const userSettingsStore = useUserSettingsStore();
+const { visible_columns } = storeToRefs(userSettingsStore);
+
 const router = useRouter();
 
 const stageMeta: Record<ProjectStage, { label: string; tone: 'info' | 'warn' | 'success' | 'accent' }> = {
@@ -264,6 +269,8 @@ h1 {
   background: var(--surface, #ffffff);
   border-color: var(--border, #dfe3ec);
   color: var(--text, #0f172a);
+  text-decoration: none;
+  display: inline-block;
 }
 
 .primary:not(:disabled):hover,
