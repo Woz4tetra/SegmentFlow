@@ -4,8 +4,7 @@
       <p class="eyebrow">Projects</p>
       <h1>Annotation Projects</h1>
       <p class="lede">
-        Browse every labeling project, monitor its stage, and jump back into work fast. UI-001 delivers the
-        grid-first home view the team can build on.
+        Create a new project and upload a video, or upload a video to an existing project to continue annotation.
       </p>
       <div class="hero__meta">
         <span class="pill">{{ total }} projects</span>
@@ -16,8 +15,8 @@
       <button class="ghost" type="button" :disabled="loading" @click="handleRefresh">
         {{ loading ? 'Refreshing...' : 'Refresh' }}
       </button>
-      <button class="primary" type="button" @click="openCreate">
-        New Project
+      <button class="primary" type="button" @click="handleCreateProject">
+        + New Project
       </button>
     </div>
   </section>
@@ -42,8 +41,7 @@
     <div v-else-if="!orderedProjects.length" class="empty">
       <div>
         <p class="empty__title">No projects yet</p>
-        <p class="empty__body">Create a project to start annotating videos. You will see it appear here instantly.</p>
-        <button class="primary" type="button" @click="openCreate">Create Project</button>
+        <p class="empty__body">Click "New Project" to create your first project, then upload a video to begin annotation.</p>
       </div>
     </div>
 
@@ -72,7 +70,6 @@
             </span>
           </div>
           <div class="thumb__name">{{ project.name }}</div>
-          <p class="thumb__id">{{ shortId(project.id) }}</p>
         </div>
 
         <div class="meta">
@@ -92,8 +89,6 @@
       </article>
     </div>
   </section>
-
-  <CreateProjectModal :open="createOpen" @close="createOpen = false" @submit="handleCreate" />
 </template>
 
 <script lang="ts" setup>
@@ -102,13 +97,11 @@ import { storeToRefs } from 'pinia';
 import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
 import { useRouter } from 'vue-router';
-import CreateProjectModal from '../components/CreateProjectModal.vue';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
 const { fetchProjects } = projectsStore;
 const router = useRouter();
-const createOpen = ref(false);
 
 const stageMeta: Record<ProjectStage, { label: string; tone: 'info' | 'warn' | 'success' | 'accent' }> = {
   upload: { label: 'Stage 1 / Upload', tone: 'accent' },
@@ -156,8 +149,6 @@ const gradientStyle = (project: Project) => {
   return { background: `linear-gradient(135deg, ${from}, ${to})` };
 };
 
-const shortId = (id?: string): string => `ID: ${(id ?? '????????').slice(0, 8)}`;
-
 const labelForStage = (stage: ProjectStage): string => stageMeta[stage]?.label ?? 'Unknown stage';
 const toneForStage = (stage: ProjectStage): string => stageMeta[stage]?.tone ?? 'info';
 
@@ -181,16 +172,8 @@ const handleRefresh = async () => {
   await fetchProjects();
 };
 
-const openCreate = () => {
-  createOpen.value = true;
-};
-
-const handleCreate = async ({ name, active }: { name: string; active: boolean }) => {
-  const created = await projectsStore.createProject(name, active);
-  createOpen.value = false;
-  if (created?.id) {
-    router.push({ name: 'Upload', params: { id: created.id } });
-  }
+const handleCreateProject = () => {
+  router.push({ name: 'Upload', params: { id: 'new' } });
 };
 
 onMounted(() => {

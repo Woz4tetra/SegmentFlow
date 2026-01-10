@@ -2,9 +2,11 @@
   <!-- Top hero: same width and style approach as Home hero -->
   <section class="hero">
     <div class="hero__text">
-      <p class="eyebrow">Stage 1</p>
+      <p class="eyebrow">Create Project</p>
       <h1>Upload Video</h1>
-      <p class="lede">Project: <strong>{{ id }}</strong>. Upload a source video to begin annotation.</p>
+      <p class="lede">
+        Select a video file to create a new annotation project. Your project will be named based on the video filename.
+      </p>
     </div>
     <div class="hero__actions">
       <router-link to="/" class="ghost btn-icon" title="Back to Projects">
@@ -19,15 +21,62 @@
   <!-- Main upload card: full-width like Home hero card -->
   <section class="content">
     <div class="upload-card">
-      <p>This is a placeholder Upload page. Drag-and-drop and progress UI will be added soon.</p>
+      <div class="upload-area">
+        <input
+          ref="fileInput"
+          type="file"
+          accept="video/*"
+          style="display: none"
+          @change="handleFileSelect"
+        />
+        <button
+          class="upload-button"
+          :disabled="isCreatingProject"
+          @click="triggerFileInput"
+        >
+          {{ isCreatingProject ? 'Creating project...' : 'Select Video File' }}
+        </button>
+        <p class="upload-hint">Supported formats: MP4, AVI, MOV</p>
+      </div>
     </div>
   </section>
 </template>
 
 <script lang="ts" setup>
-import { useRoute } from 'vue-router';
-const route = useRoute();
-const id = route.params.id as string;
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useProjectsStore } from '../stores/projects';
+
+const router = useRouter();
+const projectsStore = useProjectsStore();
+const fileInput = ref<HTMLInputElement | null>(null);
+const isCreatingProject = ref(false);
+
+const handleFileSelect = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  
+  if (!file) return;
+  
+  // Extract filename without extension as project name
+  const filename = file.name.replace(/\.[^/.]+$/, '');
+  const projectName = filename || 'Untitled Project';
+  
+  isCreatingProject.value = true;
+  try {
+    const created = await projectsStore.createProject(projectName, true);
+    if (created?.id) {
+      // Project created successfully, reset form
+      fileInput.value = null;
+    }
+  } finally {
+    isCreatingProject.value = false;
+  }
+};
+
+const triggerFileInput = () => {
+  fileInput.value?.click();
+};
 </script>
 
 <style scoped>
@@ -67,9 +116,13 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   border-radius: 12px;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.content { width: 100%; }
+.ghost:hover {
+  transform: translateY(-2px);
+}
 .upload-card {
   width: 100%;
   border: 1px solid var(--border, #dfe3ec);
@@ -82,5 +135,40 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 @media (max-width: 900px) {
   .hero { flex-direction: column; }
   .hero__actions { justify-content: flex-start; }
+}
+
+.upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.upload-button {
+  padding: 0.7rem 1.2rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  font-weight: 600;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.28);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.upload-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(37, 99, 235, 0.35);
+}
+
+.upload-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.upload-hint {
+  color: var(--muted, #4b5563);
+  font-size: 0.9rem;
+  margin: 0;
 }
 </style>
