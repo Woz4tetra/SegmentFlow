@@ -73,7 +73,6 @@ class TestLabelCreate:
         )
         assert resp.status_code == 404
 
-
     @pytest.mark.asyncio
     async def test_create_label_with_thumbnail(
         self,
