@@ -10,34 +10,41 @@
       <p class="eyebrow">Stage: Trim</p>
       <h1>Trim & Preview</h1>
       <p class="lede">
-        Select the start and end positions to trim your uploaded video. Use the dual slider to preview the selected range.
+        Select the start and end positions. The previews update to show the chosen start and end frames. Click "Convert to Images" to generate JPEGs for the selected range.
       </p>
     </div>
   </section>
 
   <section class="content">
     <div class="trim-card">
-      <div v-if="loading" class="loading">Loading project & video…</div>
+      <div v-if="loading" class="loading">Loading project & metadata…</div>
       <div v-else>
-        <div class="video-wrap">
-          <video ref="videoRef" :src="videoUrl" controls @loadedmetadata="onLoadedMetadata" />
+        <div class="preview-wrap">
+          <div class="preview">
+            <div class="preview__label">Start Preview</div>
+            <img :src="previewStartUrl" alt="Start preview" />
+          </div>
+          <div class="preview">
+            <div class="preview__label">End Preview</div>
+            <img :src="previewEndUrl" alt="End preview" />
+          </div>
         </div>
 
         <div v-if="duration > 0" class="controls">
           <div class="slider-row">
             <label>Start: <strong>{{ formatTime(startSec) }}</strong></label>
-            <input type="range" :min="0" :max="duration" step="0.1" v-model.number="startSec" @input="syncVideoToStart" />
+            <input type="range" :min="0" :max="duration" step="0.1" v-model.number="startSec" />
           </div>
           <div class="slider-row">
             <label>End: <strong>{{ formatTime(endSec) }}</strong></label>
-            <input type="range" :min="0" :max="duration" step="0.1" v-model.number="endSec" @input="syncVideoToEnd" />
+            <input type="range" :min="0" :max="duration" step="0.1" v-model.number="endSec" />
           </div>
 
           <p class="hint" v-if="validationError">{{ validationError }}</p>
 
           <div class="actions">
             <button class="primary" :disabled="!!validationError || saving" @click="saveTrim">Save Trim</button>
-            <button class="ghost" :disabled="saving" @click="playSelected">Play Selected Range</button>
+            <button class="ghost" :disabled="!!validationError || converting" @click="convertImages">Convert to Images</button>
           </div>
         </div>
         <div v-else class="loading">Waiting for video metadata…</div>
@@ -47,7 +54,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 
@@ -71,12 +78,13 @@ const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? 'http://loca
 const loading = ref(true);
 const saving = ref(false);
 const project = ref<Project | null>(null);
-const videoRef = ref<HTMLVideoElement | null>(null);
+const converting = ref(false);
 const duration = ref(0);
 const startSec = ref(0);
 const endSec = ref(0);
-
-const videoUrl = computed(() => `/api/v1/projects/${projectId}/video`);
+const baseApi = import.meta.env.VITE_API_URL ?? '/api/v1';
+const previewStartUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${startSec.value}`);
+const previewEndUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${endSec.value}`);
 
 function formatTime(sec: number): string {
   const s = Math.max(0, sec);
@@ -94,40 +102,9 @@ function validate(): string | '' {
 
 const validationError = computed(() => validate());
 
-function syncVideoToStart() {
-  if (videoRef.value) {
-    videoRef.value.currentTime = Math.min(Math.max(startSec.value, 0), duration.value);
-  }
-}
-function syncVideoToEnd() {
-  if (videoRef.value) {
-    videoRef.value.currentTime = Math.min(Math.max(endSec.value, 0), duration.value);
-  }
-}
-
-function playSelected() {
-  const v = videoRef.value;
-  if (!v) return;
-  v.currentTime = startSec.value;
-  v.play();
-  const tick = () => {
-    if (v.currentTime >= endSec.value || v.paused) {
-      v.pause();
-      v.currentTime = endSec.value;
-      return;
-    }
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}
-
-async function onLoadedMetadata() {
-  const v = videoRef.value;
-  if (!v) return;
-  duration.value = v.duration;
-  // Initialize sliders using existing trim or full duration
-  startSec.value = project.value?.trim_start ?? 0;
-  endSec.value = project.value?.trim_end ?? duration.value;
+async function fetchVideoInfo() {
+  const { data } = await api.get<{ fps: number; frame_count: number; width: number; height: number; duration: number }>(`/projects/${projectId}/video_info`);
+  duration.value = data?.duration ?? 0;
 }
 
 async function fetchProject() {
@@ -159,10 +136,27 @@ async function saveTrim() {
 onMounted(async () => {
   try {
     await fetchProject();
+    await fetchVideoInfo();
   } finally {
     loading.value = false;
   }
 });
+
+async function convertImages() {
+  const err = validate();
+  if (err) return;
+  try {
+    converting.value = true;
+    const { data } = await api.post(`/projects/${projectId}/convert_images`, null, {
+      params: { trim_start: startSec.value, trim_end: endSec.value },
+    });
+    console.log('Conversion summary:', data);
+  } catch (e) {
+    console.error('Failed to convert images', e);
+  } finally {
+    converting.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -186,8 +180,10 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 
 .content { width: 100%; display: flex; flex-direction: column; gap: 1rem; }
 .trim-card { width: 100%; border: 1px solid var(--border, #dfe3ec); border-radius: 16px; padding: 1.5rem; background: var(--surface, #ffffff); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
-.video-wrap { display: flex; justify-content: center; background: #0b1020; border-radius: 12px; overflow: hidden; margin-bottom: 1rem; }
-video { width: 100%; max-height: 360px; }
+.preview-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.preview { background: #0b1020; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.preview__label { color: #cbd5e1; font-weight: 700; padding: 0.5rem 0.75rem; }
+.preview img { width: 100%; height: auto; display: block; }
 .controls { display: flex; flex-direction: column; gap: 0.75rem; }
 .slider-row { display: grid; grid-template-columns: 180px 1fr; align-items: center; gap: 0.75rem; }
 .actions { display: flex; gap: 0.75rem; }

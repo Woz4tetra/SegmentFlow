@@ -1,10 +1,11 @@
 """Projects endpoint for CRUD operations."""
 
+import io
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.video_upload import VideoUploadService
+from app.core.video_frames import read_frame_at_time, convert_range_to_jpegs, get_video_info
 from app.models.project import Project, ProjectStage
 
 logger = get_logger(__name__)
@@ -204,6 +206,7 @@ async def init_video_upload(
     total_chunks: int,
     total_size: int,
     file_hash: str,
+    original_name: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Initialize a video upload session.
@@ -242,6 +245,7 @@ async def init_video_upload(
             total_chunks,
             total_size,
             file_hash,
+            original_name,
         )
 
         logger.info(
@@ -379,7 +383,15 @@ async def complete_video_upload(
         projects_root = Path(settings.PROJECTS_ROOT_DIR)
         project_dir = projects_root / str(project_id)
         videos_dir = project_dir / "videos"
-        output_path = videos_dir / "original.mp4"
+        # Determine extension from original filename if available
+        session = _upload_service._sessions.get(str(project_id))  # scoped use
+        default_ext = ".mp4"
+        ext = default_ext
+        if session and session.original_name:
+            ext_candidate = Path(session.original_name).suffix.lower()
+            if ext_candidate in {".mp4", ".mov", ".avi"}:
+                ext = ext_candidate
+        output_path = videos_dir / f"original{ext}"
 
         logger.info(f"Finalizing upload to {output_path}")
 
@@ -432,8 +444,9 @@ async def complete_video_upload(
 @router.get("/projects/{project_id}/video")
 async def get_project_video(
     project_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
+):
     """Stream the uploaded video file for a project.
 
     Returns the original uploaded video for preview/trim UI.
@@ -448,39 +461,64 @@ async def get_project_video(
     Raises:
         HTTPException: If project not found or video missing
     """
-    try:
-        result = await db.execute(select(Project).where(Project.id == project_id))
-        db_project = result.scalar_one_or_none()
+    # Fetch and validate project
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    db_project = result.scalar_one_or_none()
+    if not db_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if not db_project.video_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No video for project")
 
-        if not db_project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Project with ID {project_id} not found",
+    video_path = Path(db_project.video_path)
+    if not video_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file missing")
+
+    # Media type
+    ext = video_path.suffix.lower()
+    media_map = {".mp4": "video/mp4", ".mov": "video/quicktime", ".avi": "video/x-msvideo"}
+    media_type = media_map.get(ext, "application/octet-stream")
+
+    # Byte-range support
+    range_header = request.headers.get("range")
+    file_size = video_path.stat().st_size
+    if range_header:
+        try:
+            bytes_range = range_header.strip().lower().split("=")[1]
+            parts = bytes_range.split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
+            start = max(0, start)
+            end = min(end, file_size - 1)
+            chunk_size = (end - start) + 1
+
+            def iter_file(path: Path, offset: int, length: int):
+                with open(path, "rb") as f:
+                    f.seek(offset)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = f.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+
+            headers = {
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(chunk_size),
+                "Content-Type": media_type,
+            }
+            return StreamingResponse(
+                iter_file(video_path, start, chunk_size),
+                status_code=206,
+                headers=headers,
+                media_type=media_type,
             )
+        except Exception:
+            # Fallback to full file on parse errors
+            pass
 
-        if not db_project.video_path:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No video uploaded for this project",
-            )
-
-        video_path = Path(db_project.video_path)
-        if not video_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Video file not found on server",
-            )
-
-        # Assume MP4 for now (upload finalization saves to original.mp4)
-        return FileResponse(str(video_path), media_type="video/mp4")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to stream video for project {project_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to stream video",
-        ) from e
+    return FileResponse(str(video_path), media_type=media_type)
 
 
 @router.post("/projects/{project_id}/trim", response_model=ProjectResponse)
@@ -535,6 +573,94 @@ async def set_trim_range(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to set trim range",
         ) from e
+
+
+@router.get("/projects/{project_id}/preview_frame")
+async def preview_frame(
+    project_id: UUID,
+    time_sec: float,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a single JPEG frame at the given time for preview purposes."""
+    try:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+        if not db_project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not db_project.video_path:
+            raise HTTPException(status_code=404, detail="No video for project")
+        jpeg = read_frame_at_time(Path(db_project.video_path), float(time_sec))
+        return StreamingResponse(io.BytesIO(jpeg), media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"OpenCV not available: {e}") from e
+    except Exception as e:
+        logger.error(f"Failed to generate preview for {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate preview") from e
+
+
+@router.post("/projects/{project_id}/convert_images")
+async def convert_images(
+    project_id: UUID,
+    trim_start: float,
+    trim_end: float,
+    processes: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Convert frames within selected range to JPEG and save under project folder."""
+    try:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+        if not db_project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not db_project.video_path:
+            raise HTTPException(status_code=404, detail="No video for project")
+
+        projects_root = Path(settings.PROJECTS_ROOT_DIR)
+        out_dir = projects_root / str(project_id) / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        summary = convert_range_to_jpegs(
+            Path(db_project.video_path), float(trim_start), float(trim_end), out_dir, processes
+        )
+        return {
+            "project_id": str(project_id),
+            "output_dir": str(out_dir),
+            "total": summary["total"],
+            "saved": summary["saved"],
+            "message": "Conversion completed",
+        }
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"OpenCV not available: {e}") from e
+    except Exception as e:
+        logger.error(f"Failed to convert images for {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to convert images") from e
+
+
+@router.get("/projects/{project_id}/video_info")
+async def video_info(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return basic video metadata: fps, frame_count, width, height, duration."""
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    db_project = result.scalar_one_or_none()
+    if not db_project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not db_project.video_path:
+        raise HTTPException(status_code=404, detail="No video for project")
+    info = get_video_info(Path(db_project.video_path))
+    duration = (info.frame_count / info.fps) if info.fps > 0 else 0.0
+    return {
+        "fps": info.fps,
+        "frame_count": info.frame_count,
+        "width": info.width,
+        "height": info.height,
+        "duration": duration,
+    }
 
 
 @router.get("/projects/{project_id}/upload/progress")

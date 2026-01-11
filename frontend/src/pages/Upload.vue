@@ -85,6 +85,7 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
       total_chunks: totalChunks,
       total_size: file.size,
       file_hash: fileHash,
+      original_name: file.name,
     },
   });
   console.log('Upload session initialized');

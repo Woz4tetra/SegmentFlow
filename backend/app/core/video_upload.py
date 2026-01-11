@@ -29,6 +29,7 @@ class UploadSession(NamedTuple):
     file_hash: str
     temp_dir: Path
     chunks_received: int = 0
+    original_name: str | None = None
 
 
 class VideoUploadService:
@@ -68,6 +69,7 @@ class VideoUploadService:
         total_chunks: int,
         total_size: int,
         file_hash: str,
+        original_name: str | None = None,
     ) -> None:
         """Initialize a new upload session.
 
@@ -99,6 +101,7 @@ class VideoUploadService:
             file_hash=file_hash,
             temp_dir=temp_dir,
             chunks_received=0,
+            original_name=original_name,
         )
         self._sessions[session_key] = session
         logger.info(
