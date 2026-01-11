@@ -304,8 +304,8 @@ h1 {
 
 .grid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   width: 100%;
 }
 
@@ -317,6 +317,7 @@ h1 {
   display: flex;
   flex-direction: column;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  aspect-ratio: 1;
 }
 
 .project-card[data-available='true'] {
@@ -336,10 +337,11 @@ h1 {
 .thumb {
   padding: 1rem 1.1rem;
   color: #ffffff;
-  min-height: 150px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  justify-content: space-between;
 }
 
 .thumb__top {
@@ -399,6 +401,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  flex-shrink: 0;
 }
 
 .meta__row {

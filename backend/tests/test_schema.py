@@ -5,9 +5,11 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import IntegrityError
 
+from app.api.v1.schemas import LabelBase, LabelUpdate, ProjectUpdate
 from app.core.database import AsyncSessionLocal, engine, init_db
 from app.models import Image, Label, LabeledPoint, Mask, Project, Stats
 
@@ -100,3 +102,52 @@ async def test_cascade_delete_removes_children() -> None:
         for model in (Project, Label, Image, LabeledPoint, Mask, Stats):
             count = await session.scalar(select(func.count()).select_from(model))
             assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_project_update_stage_validation() -> None:
+    """Test ProjectUpdate schema validates stage values."""
+    # Valid stage
+    valid_update = ProjectUpdate(stage="upload")
+    assert valid_update.stage == "upload"
+
+    # Invalid stage should raise ValidationError
+    with pytest.raises(ValidationError) as exc_info:
+        ProjectUpdate(stage="invalid_stage")
+    assert "Invalid stage" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_label_color_hex_validation() -> None:
+    """Test LabelBase and LabelUpdate validate color hex format."""
+    # Valid color
+    valid_label = LabelBase(name="test", color_hex="#ff0000")
+    assert valid_label.color_hex == "#ff0000"
+
+    # Invalid format - not starting with #
+    with pytest.raises(ValidationError) as exc_info:
+        LabelBase(name="test", color_hex="ff0000")
+    assert "format #RRGGBB" in str(exc_info.value)
+
+    # Invalid format - wrong length
+    with pytest.raises(ValidationError) as exc_info:
+        LabelBase(name="test", color_hex="#ff00")
+    assert "format #RRGGBB" in str(exc_info.value)
+
+    # Invalid format - non-hex digits
+    with pytest.raises(ValidationError) as exc_info:
+        LabelBase(name="test", color_hex="#gggggg")
+    assert "hex digits" in str(exc_info.value)
+
+    # Test LabelUpdate with None color (should be allowed)
+    update_no_color = LabelUpdate(name="test")
+    assert update_no_color.color_hex is None
+
+    # Test LabelUpdate with valid color
+    update_with_color = LabelUpdate(color_hex="#00ff00")
+    assert update_with_color.color_hex == "#00ff00"
+
+    # Test LabelUpdate with invalid color
+    with pytest.raises(ValidationError) as exc_info:
+        LabelUpdate(color_hex="invalid")
+    assert "format #RRGGBB" in str(exc_info.value)
