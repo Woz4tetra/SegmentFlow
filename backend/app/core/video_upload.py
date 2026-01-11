@@ -248,8 +248,7 @@ class VideoUploadService:
             if file_hash != session.file_hash:
                 output_path.unlink()  # Delete corrupted file
                 logger.error(
-                    f"Hash mismatch for {project_id}: expected {session.file_hash}, "
-                    f"got {file_hash}"
+                    f"Hash mismatch for {project_id}: expected {session.file_hash}, got {file_hash}"
                 )
                 raise RuntimeError(
                     f"File hash mismatch. Expected {session.file_hash}, got {file_hash}"

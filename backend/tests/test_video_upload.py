@@ -41,14 +41,14 @@ def create_mock_video_file(size_mb: int = 10) -> tuple[bytes, str]:
         size_mb: Size of the mock file in megabytes
 
     Returns:
-        tuple: (file_bytes, md5_hash)
+        tuple: (file_bytes, sha256_hash)
     """
     # Create mock video data (just zeros, simulating video bytes)
     file_size = size_mb * 1024 * 1024
     file_data = b"\x00" * file_size
 
-    # Compute MD5 hash
-    hasher = hashlib.md5()
+    # Compute SHA-256 hash
+    hasher = hashlib.sha256()
     hasher.update(file_data)
     file_hash = hasher.hexdigest()
 
@@ -577,3 +577,118 @@ async def test_upload_multiple_projects_concurrent(
     assert progress2.status_code == 200
     assert progress1.json()["chunks_received"] == 1
     assert progress2.json()["chunks_received"] == 1
+
+
+@pytest.mark.asyncio
+async def test_init_upload_duplicate_session(
+    client: AsyncClient,
+    test_project: Project,
+    clean_db: AsyncIterator,
+) -> None:
+    """Test that initializing upload twice for same project fails.
+
+    Args:
+        client: AsyncClient for HTTP requests
+        test_project: Test project fixture
+        clean_db: Clean database fixture
+    """
+    file_data, file_hash = create_mock_video_file(1)
+
+    # First init should succeed
+    response1 = await client.post(
+        f"/api/v1/projects/{test_project.id}/upload/init",
+        params={
+            "total_chunks": 1,
+            "total_size": len(file_data),
+            "file_hash": file_hash,
+        },
+    )
+    assert response1.status_code == 200
+
+    # Second init should fail with 400
+    response2 = await client.post(
+        f"/api/v1/projects/{test_project.id}/upload/init",
+        params={
+            "total_chunks": 1,
+            "total_size": len(file_data),
+            "file_hash": file_hash,
+        },
+    )
+    assert response2.status_code == 400
+    assert "already in progress" in response2.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_upload_chunk_out_of_range(
+    client: AsyncClient,
+    test_project: Project,
+    clean_db: AsyncIterator,
+) -> None:
+    """Test uploading a chunk with invalid chunk number.
+
+    Args:
+        client: AsyncClient for HTTP requests
+        test_project: Test project fixture
+        clean_db: Clean database fixture
+    """
+    file_data, file_hash = create_mock_video_file(1)
+
+    # Init upload with 2 chunks
+    await client.post(
+        f"/api/v1/projects/{test_project.id}/upload/init",
+        params={
+            "total_chunks": 2,
+            "total_size": len(file_data),
+            "file_hash": file_hash,
+        },
+    )
+
+    # Try to upload chunk 5 (out of range)
+    response = await client.post(
+        f"/api/v1/projects/{test_project.id}/upload/chunk",
+        params={
+            "chunk_number": 5,
+        },
+        files={"chunk_data": ("chunk_5", io.BytesIO(file_data))},
+    )
+    assert response.status_code == 400  # Bad request for invalid chunk number
+
+
+@pytest.mark.asyncio
+async def test_complete_upload_no_session(
+    client: AsyncClient,
+    test_project: Project,
+    clean_db: AsyncIterator,
+) -> None:
+    """Test completing upload without initializing session.
+
+    Args:
+        client: AsyncClient for HTTP requests
+        test_project: Test project fixture
+        clean_db: Clean database fixture
+    """
+    # Try to complete without init
+    response = await client.post(
+        f"/api/v1/projects/{test_project.id}/upload/complete",
+    )
+    assert response.status_code == 400  # Bad request for no session
+
+
+@pytest.mark.asyncio
+async def test_get_progress_no_session(
+    client: AsyncClient,
+    test_project: Project,
+    clean_db: AsyncIterator,
+) -> None:
+    """Test getting progress without initializing session.
+
+    Args:
+        client: AsyncClient for HTTP requests
+        test_project: Test project fixture
+        clean_db: Clean database fixture
+    """
+    # Try to get progress without init
+    response = await client.get(
+        f"/api/v1/projects/{test_project.id}/upload/progress",
+    )
+    assert response.status_code == 404

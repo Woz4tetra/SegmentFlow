@@ -363,7 +363,7 @@ async def complete_video_upload(
     """
     try:
         logger.info(f"Received complete upload request for project {project_id}")
-        
+
         # Verify project exists
         result = await db.execute(select(Project).where(Project.id == project_id))
         db_project = result.scalar_one_or_none()
@@ -379,7 +379,7 @@ async def complete_video_upload(
         project_dir = projects_root / str(project_id)
         videos_dir = project_dir / "videos"
         output_path = videos_dir / "original.mp4"
-        
+
         logger.info(f"Finalizing upload to {output_path}")
 
         # Finalize upload (combine chunks, verify hash, cleanup temp files)

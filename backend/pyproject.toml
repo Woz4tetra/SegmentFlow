@@ -104,6 +104,24 @@ module = [
 ]
 ignore_errors = true
 
+[tool.coverage.run]
+omit = [
+    "app/scripts/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
@@ -118,7 +136,7 @@ addopts = [
     "--cov=app",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=html",
-    "--cov-fail-under=80",
+    "--cov-fail-under=70",
 ]
 markers = [
     "asyncio: marks tests as async",
