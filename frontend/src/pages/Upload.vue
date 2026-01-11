@@ -131,7 +131,7 @@ const handleFileSelect = async (file: File) => {
   
   isCreatingProject.value = true;
   try {
-    if (routeProjectId) {
+    if (routeProjectId && routeProjectId !== 'new') {
       // Existing project: upload video to this project
       console.log('Uploading to existing project:', routeProjectId);
       await uploadVideoFile(routeProjectId, file);
@@ -165,7 +165,7 @@ const handleFileSelect = async (file: File) => {
 
 // On entering Upload stage for an existing project, route to Trim if video exists
 onMounted(async () => {
-  if (!routeProjectId) return;
+  if (!routeProjectId || routeProjectId === 'new') return;
   try {
     const { data } = await api.get(`/projects/${routeProjectId}`);
     if (data?.video_path) {
