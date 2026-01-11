@@ -182,3 +182,62 @@ class LabelResponse(LabelBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ===== Video Upload Schemas =====
+
+
+class VideoUploadChunkRequest(BaseModel):
+    """Schema for uploading a video chunk.
+
+    Attributes:
+        chunk_number: Sequential chunk number (0-indexed)
+        total_chunks: Total number of chunks in this upload
+        chunk_size: Size of this chunk in bytes
+        file_hash: SHA-256 hash of complete file for integrity verification
+    """
+
+    chunk_number: int = Field(..., ge=0, description="Sequential chunk number (0-indexed)")
+    total_chunks: int = Field(..., gt=0, description="Total number of chunks")
+    chunk_size: int = Field(..., gt=0, description="Size of this chunk in bytes")
+    file_hash: str = Field(
+        ..., min_length=64, max_length=64, description="SHA-256 hash of complete file"
+    )
+
+
+class VideoUploadProgressResponse(BaseModel):
+    """Schema for video upload progress.
+
+    Attributes:
+        project_id: ID of the project
+        total_size: Total size of the video file in bytes
+        uploaded_size: Number of bytes uploaded so far
+        progress_percent: Upload progress as percentage (0-100)
+        chunks_received: Number of chunks received so far
+        total_chunks: Total number of chunks expected
+        status: Current upload status (uploading, completed, failed)
+    """
+
+    project_id: UUID
+    total_size: int = Field(..., ge=0, description="Total size in bytes")
+    uploaded_size: int = Field(..., ge=0, description="Bytes uploaded so far")
+    progress_percent: float = Field(..., ge=0, le=100, description="Progress percentage")
+    chunks_received: int = Field(..., ge=0, description="Number of chunks received")
+    total_chunks: int = Field(..., gt=0, description="Total number of chunks")
+    status: str = Field(..., description="Upload status: uploading, completed, or failed")
+
+
+class VideoUploadCompleteResponse(BaseModel):
+    """Schema for completed video upload response.
+
+    Attributes:
+        project_id: ID of the project
+        video_path: Path where the video was saved
+        file_size: Size of uploaded file in bytes
+        message: Confirmation message
+    """
+
+    project_id: UUID
+    video_path: str = Field(..., description="Path where video was saved")
+    file_size: int = Field(..., ge=0, description="Size of uploaded file")
+    message: str = Field(..., description="Confirmation message")

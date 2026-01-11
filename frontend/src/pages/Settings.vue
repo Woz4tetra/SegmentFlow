@@ -1,18 +1,16 @@
 <template>
   <!-- Top hero: same width and style approach as Home hero -->
   <section class="hero">
+    <router-link to="/" class="ghost btn-icon" title="Back to Projects">
+      <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span>Back to Projects</span>
+    </router-link>
     <div class="hero__text">
       <p class="eyebrow">Settings</p>
       <h1>Application Settings</h1>
       <p class="lede">Customize theme and UI preferences. Changes apply immediately.</p>
-    </div>
-    <div class="hero__actions">
-      <router-link to="/" class="ghost btn-icon" title="Back to Projects">
-        <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span>Back to Projects</span>
-      </router-link>
     </div>
   </section>
 
@@ -106,9 +104,9 @@ const resetSettings = () => {
 <style scoped>
 .hero {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 1.5rem;
+  gap: 1rem;
   padding: 1.25rem 1.5rem;
   border: 1px solid var(--border, #dfe3ec);
   background: var(--surface, #ffffff);
@@ -118,7 +116,7 @@ const resetSettings = () => {
   width: 100%;
 }
 
-.hero__text { max-width: 720px; }
+.hero__text { max-width: 720px; width: 100%; }
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.08em;

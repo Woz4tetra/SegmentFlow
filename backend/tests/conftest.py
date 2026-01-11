@@ -7,8 +7,9 @@ import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import engine
+from app.core.database import engine, get_db
 from app.models.image import Image
 from app.models.label import Label
 from app.models.labeled_point import LabeledPoint
@@ -35,6 +36,23 @@ async def client() -> AsyncIterator[AsyncClient]:
             yield ac
         # Explicitly close transport to trigger FastAPI shutdown and release resources
         await transport.aclose()
+
+
+@pytest_asyncio.fixture
+async def db(clean_db: AsyncIterator) -> AsyncIterator[AsyncSession]:
+    """Provide a database session for tests.
+
+    Uses the clean_db fixture to ensure database isolation and provides
+    a fresh AsyncSession for each test.
+
+    Args:
+        clean_db: Clean database fixture
+
+    Yields:
+        AsyncSession: Database session for the test
+    """
+    async for session in get_db():
+        yield session
 
 
 @pytest_asyncio.fixture

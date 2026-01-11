@@ -29,7 +29,7 @@ const themeClass = computed(() => (theme.value === 'dark' ? 'theme-dark' : 'them
   color: var(--text, #0f172a);
 }
 .container {
-  max-width: 1180px;
+  max-width: 3000px;
   width: 100%;
   margin: 1.25rem auto;
   padding: 0 1.25rem;
