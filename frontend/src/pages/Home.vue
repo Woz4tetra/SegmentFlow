@@ -8,7 +8,6 @@
       </p>
       <div class="hero__meta">
         <span class="pill">{{ total }} projects</span>
-        <span class="pill pill--muted">Auto-save & real-time</span>
       </div>
     </div>
     <div class="hero__actions">
@@ -109,12 +108,12 @@ const { visible_columns } = storeToRefs(userSettingsStore);
 const router = useRouter();
 
 const stageMeta: Record<ProjectStage, { label: string; tone: 'info' | 'warn' | 'success' | 'accent' }> = {
-  upload: { label: 'Stage 1 / Upload', tone: 'accent' },
-  trim: { label: 'Stage 2 / Trim', tone: 'info' },
-  manual_labeling: { label: 'Stage 3 / Manual Labeling', tone: 'accent' },
-  propagation: { label: 'Stage 4 / Propagation', tone: 'info' },
-  validation: { label: 'Stage 5 / Validation', tone: 'warn' },
-  export: { label: 'Stage 6 / Export', tone: 'success' },
+  upload: { label: 'Stage 0 / Upload', tone: 'accent' },
+  trim: { label: 'Stage 1 / Trim', tone: 'info' },
+  manual_labeling: { label: 'Stage 2 / Manual Labeling', tone: 'accent' },
+  propagation: { label: 'Stage 3 / Propagation', tone: 'info' },
+  validation: { label: 'Stage 4 / Validation', tone: 'warn' },
+  export: { label: 'Stage 5 / Export', tone: 'success' },
 };
 
 const palette: Array<[string, string]> = [
@@ -200,6 +199,7 @@ onMounted(() => {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
   margin-bottom: 1.25rem;
   width: 100%;
+  transition: background var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
 .hero__text {
@@ -248,7 +248,7 @@ h1 {
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  transition: transform var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, opacity var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease;
   font-size: 0.95rem;
 }
 
@@ -318,6 +318,7 @@ h1 {
   flex-direction: column;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   aspect-ratio: 1;
+  transition: transform var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
 .project-card[data-available='true'] {
