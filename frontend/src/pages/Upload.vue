@@ -21,6 +21,7 @@
     <div class="upload-card">
       <div class="upload-area">
         <input
+          ref="fileInputRef"
           id="videoFileInput"
           type="file"
           accept="video/*"
@@ -50,6 +51,7 @@ import axios from 'axios';
 const router = useRouter();
 const projectsStore = useProjectsStore();
 const isCreatingProject = ref(false);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
@@ -144,9 +146,8 @@ const handleFileSelect = async (event: Event) => {
       console.log('Video upload complete!');
       
       // Step 3: Clear input
-      const fileInput = document.getElementById('videoFileInput') as HTMLInputElement;
-      if (fileInput) {
-        fileInput.value = '';
+      if (fileInputRef.value) {
+        fileInputRef.value.value = '';
       }
       
       // Step 4: Navigate to the project (or next stage)
@@ -158,9 +159,8 @@ const handleFileSelect = async (event: Event) => {
   } catch (error) {
     console.error('Failed to create project or upload video:', error);
     // Clear input on error too
-    const fileInput = document.getElementById('videoFileInput') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.value = '';
+    if (fileInputRef.value) {
+      fileInputRef.value.value = '';
     }
   } finally {
     isCreatingProject.value = false;
@@ -168,14 +168,12 @@ const handleFileSelect = async (event: Event) => {
 };
 
 const triggerFileInput = () => {
-  console.log('triggerFileInput called');
-  const fileInput = document.getElementById('videoFileInput') as HTMLInputElement;
-  if (fileInput) {
+  if (fileInputRef.value) {
     console.log('Found file input element, clicking it');
-    fileInput.click();
+    fileInputRef.value.click();
     console.log('File input clicked successfully');
   } else {
-    console.error('Could not find file input element with ID videoFileInput');
+    console.error('Could not find file input element');
   }
 };
 </script>

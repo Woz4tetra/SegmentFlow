@@ -18,7 +18,7 @@ class UploadSession(NamedTuple):
         project_id: ID of the project being uploaded to
         total_chunks: Total number of chunks expected
         total_size: Total size of the final file in bytes
-        file_hash: MD5 hash of the complete file for integrity verification
+        file_hash: file hash of the complete file for integrity verification
         temp_dir: Temporary directory storing chunk files
         chunks_received: Number of chunks received so far
     """
@@ -36,7 +36,7 @@ class VideoUploadService:
 
     Supports:
     - Chunked upload of large files (100MB+)
-    - Integrity verification via MD5 hash
+    - Integrity verification via file hash
     - Progress tracking
     - Automatic cleanup of failed uploads
     - Resumable uploads by storing chunks temporarily
@@ -75,7 +75,7 @@ class VideoUploadService:
             project_id: ID of the project to upload to
             total_chunks: Total number of chunks expected
             total_size: Total size of the complete file in bytes
-            file_hash: MD5 hash of the complete file for verification
+            file_hash: file hash of the complete file for verification
 
         Raises:
             ValueError: If an upload session already exists for this project
@@ -199,7 +199,7 @@ class VideoUploadService:
     def finalize_upload(self, project_id: str, output_path: Path) -> bool:
         """Finalize an upload by combining chunks and verifying integrity.
 
-        Combines all chunks into the final video file, verifies the MD5 hash,
+        Combines all chunks into the final video file, verifies the file hash,
         and cleans up temporary files.
 
         Args:

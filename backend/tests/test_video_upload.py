@@ -73,7 +73,7 @@ async def test_init_video_upload_success(
         params={
             "total_chunks": 5,
             "total_size": 50 * 1024 * 1024,  # 50MB
-            "file_hash": "abc123def456abc123def456abc123de",
+            "file_hash": "12345678" * 8,,
         },
     )
 
@@ -101,7 +101,7 @@ async def test_init_video_upload_project_not_found(
         params={
             "total_chunks": 5,
             "total_size": 50 * 1024 * 1024,
-            "file_hash": "abc123def456abc123def456abc123de",
+            "file_hash": "12345678" * 8,,
         },
     )
 
@@ -126,7 +126,7 @@ async def test_init_video_upload_file_too_large(
         params={
             "total_chunks": 100,
             "total_size": 1024 * 1024 * 1024 + 1,  # 1GB + 1 byte
-            "file_hash": "abc123def456abc123def456abc123de",
+            "file_hash": "12345678" * 8,,
         },
     )
 
@@ -273,7 +273,7 @@ async def test_cancel_video_upload(
         params={
             "total_chunks": 3,
             "total_size": 30 * 1024 * 1024,
-            "file_hash": "abc123def456abc123def456abc123de",
+            "file_hash": "12345678" * 8,
         },
     )
     assert init_response.status_code == 200
@@ -415,7 +415,7 @@ async def test_upload_large_file_simulation(
 
     # Create file data
     file_data = b"\x00" * total_size
-    hasher = hashlib.md5()
+    hasher = hashlib.sha256()
     hasher.update(file_data)
     file_hash = hasher.hexdigest()
 
@@ -469,12 +469,12 @@ async def test_complete_upload_invalid_hash(
     """
     # Create file with actual hash
     file_data = b"\x00" * (2 * 1024 * 1024)  # 2MB
-    hasher = hashlib.md5()
+    hasher = hashlib.sha256()
     hasher.update(file_data)
     actual_hash = hasher.hexdigest()
 
     # Use wrong hash for initialization
-    wrong_hash = "ffffffffffffffffffffffffffffffff"
+    wrong_hash = "f" * 64
 
     init_response = await client.post(
         f"/api/v1/projects/{test_project.id}/upload/init",

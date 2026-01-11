@@ -215,7 +215,7 @@ async def init_video_upload(
         project_id: ID of the project to upload video to
         total_chunks: Total number of chunks that will be uploaded
         total_size: Total size of the video file in bytes
-        file_hash: MD5 hash of the complete file for integrity verification
+        file_hash: file hash of the complete file for integrity verification
         db: Database session dependency
 
     Returns:
@@ -347,7 +347,7 @@ async def complete_video_upload(
 ) -> VideoUploadCompleteResponse:
     """Finalize a video upload.
 
-    Combines all uploaded chunks, verifies file integrity via MD5 hash,
+    Combines all uploaded chunks, verifies file integrity via file hash,
     and updates the project with the video path. Should be called after all
     chunks have been uploaded.
 
