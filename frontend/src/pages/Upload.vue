@@ -19,25 +19,13 @@
   <!-- Main upload card: full-width like Home hero card -->
   <section class="content">
     <div class="upload-card">
-      <div class="upload-area">
-        <input
-          ref="fileInputRef"
-          id="videoFileInput"
-          type="file"
-          accept="video/*"
-          style="display: none"
-          @change="handleFileSelect"
-        />
-        <button
-          class="upload-button"
-          :disabled="isCreatingProject"
-          @click="triggerFileInput"
-          type="button"
-        >
-          {{ isCreatingProject ? 'Uploading video...' : 'Select Video File' }}
-        </button>
-        <p class="upload-hint">Supported formats: MP4, AVI, MOV</p>
-      </div>
+      <FileUpload
+        :disabled="isCreatingProject"
+        :is-uploading="isCreatingProject"
+        :upload-progress="uploadProgress"
+        :uploading-file-name="uploadingFileName"
+        @file-selected="handleFileSelect"
+      />
     </div>
   </section>
 </template>
@@ -46,12 +34,14 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useProjectsStore } from '../stores/projects';
+import FileUpload from '../components/FileUpload.vue';
 import axios from 'axios';
 
 const router = useRouter();
 const projectsStore = useProjectsStore();
 const isCreatingProject = ref(false);
-const fileInputRef = ref<HTMLInputElement | null>(null);
+const uploadProgress = ref(0);
+const uploadingFileName = ref('');
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
@@ -76,12 +66,17 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
   
   console.log(`Uploading file: ${file.name}, size: ${file.size} bytes, chunks: ${totalChunks}`);
   
-  // Compute file hash
+  // Reset progress
+  uploadProgress.value = 0;
+  uploadingFileName.value = file.name;
+  
+  // Compute file hash (1-5% progress)
   console.log('Computing file hash...');
   const fileHash = await computeFileHash(file);
   console.log('File hash:', fileHash);
+  uploadProgress.value = 5;
   
-  // Initialize upload session
+  // Initialize upload session (5-10% progress)
   console.log('Initializing upload session...');
   await api.post(`/projects/${projectId}/upload/init`, null, {
     params: {
@@ -91,8 +86,9 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
     },
   });
   console.log('Upload session initialized');
+  uploadProgress.value = 10;
   
-  // Upload chunks
+  // Upload chunks (10-90% progress)
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -108,21 +104,24 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     
+    // Update progress: 10% to 90% based on chunks uploaded
+    const chunkProgress = ((i + 1) / totalChunks) * 80;
+    uploadProgress.value = 10 + Math.round(chunkProgress);
+    
     console.log(`Chunk ${i} uploaded successfully`);
   }
   
-  // Complete upload
+  // Complete upload (90-100% progress)
+  uploadProgress.value = 90;
   console.log('Completing upload...');
   await api.post(`/projects/${projectId}/upload/complete`);
+  uploadProgress.value = 100;
   console.log('Upload completed successfully!');
 }
 
-const handleFileSelect = async (event: Event) => {
-  console.log('handleFileSelect called with event:', event);
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
+const handleFileSelect = async (file: File) => {
+  console.log('handleFileSelect called with file:', file);
   
-  console.log('Selected file:', file);
   if (!file) {
     console.warn('No file selected');
     return;
@@ -145,12 +144,7 @@ const handleFileSelect = async (event: Event) => {
       await uploadVideoFile(created.id, file);
       console.log('Video upload complete!');
       
-      // Step 3: Clear input
-      if (fileInputRef.value) {
-        fileInputRef.value.value = '';
-      }
-      
-      // Step 4: Navigate to the project (or next stage)
+      // Step 3: Navigate to the project (or next stage)
       console.log('Navigating to project...');
       await router.push({ name: 'Home' });
     } else {
@@ -158,22 +152,10 @@ const handleFileSelect = async (event: Event) => {
     }
   } catch (error) {
     console.error('Failed to create project or upload video:', error);
-    // Clear input on error too
-    if (fileInputRef.value) {
-      fileInputRef.value.value = '';
-    }
   } finally {
     isCreatingProject.value = false;
-  }
-};
-
-const triggerFileInput = () => {
-  if (fileInputRef.value) {
-    console.log('Found file input element, clicking it');
-    fileInputRef.value.click();
-    console.log('File input clicked successfully');
-  } else {
-    console.error('Could not find file input element');
+    uploadProgress.value = 0;
+    uploadingFileName.value = '';
   }
 };
 </script>
@@ -191,6 +173,7 @@ const triggerFileInput = () => {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
   margin-bottom: 1.25rem;
   width: 100%;
+  transition: background var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
 .hero__text { max-width: 720px; width: 100%; }
@@ -216,7 +199,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: transform var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease;
 }
 
 .ghost:hover {
@@ -226,48 +209,21 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   width: 100%;
   border: 1px solid var(--border, #dfe3ec);
   border-radius: 16px;
-  padding: 1rem 1.25rem;
+  padding: 1.5rem;
   background: var(--surface, #ffffff);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  transition: box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
+}
+
+.content { 
+  width: 100%; 
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 @media (max-width: 900px) {
   .hero { flex-direction: column; }
   .hero__actions { justify-content: flex-start; }
-}
-
-.upload-area {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-
-.upload-button {
-  padding: 0.7rem 1.2rem;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  color: #ffffff;
-  font-weight: 600;
-  border: 1px solid rgba(124, 58, 237, 0.35);
-  cursor: pointer;
-  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.28);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-
-.upload-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 36px rgba(37, 99, 235, 0.35);
-}
-
-.upload-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.upload-hint {
-  color: var(--muted, #4b5563);
-  font-size: 0.9rem;
-  margin: 0;
 }
 </style>

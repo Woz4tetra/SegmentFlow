@@ -33,11 +33,13 @@ const { toggleTheme } = app;
   border-radius: 14px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
   width: 100%;
+  transition: background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease;
 }
 .brand a {
   font-weight: 700;
   text-decoration: none;
   color: inherit;
+  transition: color var(--transition-duration, 0.2s) ease;
 }
 .links {
   display: flex;
@@ -47,6 +49,10 @@ const { toggleTheme } = app;
 .links a {
   text-decoration: none;
   color: inherit;
+  transition: color var(--transition-duration, 0.2s) ease, opacity var(--transition-duration, 0.2s) ease;
+}
+.links a:hover {
+  opacity: 0.7;
 }
 .theme {
   border: 1px solid var(--border, #dfe3ec);
@@ -54,5 +60,9 @@ const { toggleTheme } = app;
   border-radius: 6px;
   padding: 0.25rem 0.5rem;
   cursor: pointer;
+  transition: background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease, transform var(--transition-duration, 0.2s) ease;
+}
+.theme:hover {
+  transform: scale(1.05);
 }
 </style>

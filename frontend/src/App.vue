@@ -27,6 +27,10 @@ const themeClass = computed(() => (theme.value === 'dark' ? 'theme-dark' : 'them
   flex-direction: column;
   background: var(--bg, #f6f7fb);
   color: var(--text, #0f172a);
+  transition: background var(--transition-duration, 0.2s) ease, color var(--transition-duration, 0.2s) ease;
+  
+  /* Global transition duration for consistent easing across the app */
+  --transition-duration: 0.2s;
 }
 .container {
   max-width: 3000px;

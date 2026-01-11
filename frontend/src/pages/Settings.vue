@@ -114,6 +114,7 @@ const resetSettings = () => {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
   margin-bottom: 1.25rem;
   width: 100%;
+  transition: background var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
 .hero__text { max-width: 720px; width: 100%; }
@@ -139,7 +140,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: transform var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease;
 }
 
 .ghost:hover {
@@ -161,6 +162,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   padding: 1.25rem 1.5rem;
   background: var(--surface, #ffffff);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  transition: box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
 .section-title {
