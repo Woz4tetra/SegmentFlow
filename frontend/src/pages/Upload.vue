@@ -31,13 +31,15 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { useProjectsStore } from '../stores/projects';
 import FileUpload from '../components/FileUpload.vue';
 import axios from 'axios';
 
 const router = useRouter();
+const route = useRoute();
+const routeProjectId = route.params.id ? String(route.params.id) : '';
 const projectsStore = useProjectsStore();
 const isCreatingProject = ref(false);
 const uploadProgress = ref(0);
@@ -127,28 +129,30 @@ const handleFileSelect = async (file: File) => {
     return;
   }
   
-  // Extract filename without extension as project name
-  const filename = file.name.replace(/\.[^/.]+$/, '');
-  const projectName = filename || 'Untitled Project';
-  console.log('Creating project with name:', projectName);
-  
   isCreatingProject.value = true;
   try {
-    // Step 1: Create project
-    const created = await projectsStore.createProject(projectName, true);
-    console.log('Project created:', created);
-    
-    if (created?.id) {
-      // Step 2: Upload the video file
-      console.log('Starting video upload...');
-      await uploadVideoFile(created.id, file);
+    if (routeProjectId) {
+      // Existing project: upload video to this project
+      console.log('Uploading to existing project:', routeProjectId);
+      await uploadVideoFile(routeProjectId, file);
       console.log('Video upload complete!');
-      
-      // Step 3: Navigate to the project (or next stage)
-      console.log('Navigating to project...');
-      await router.push({ name: 'Home' });
+      await router.push({ name: 'Trim', params: { id: routeProjectId } });
     } else {
-      console.error('Project creation failed - no ID returned');
+      // No project in route: create a new project from file name
+      const filename = file.name.replace(/\.[^/.]+$/, '');
+      const projectName = filename || 'Untitled Project';
+      console.log('Creating project with name:', projectName);
+      const created = await projectsStore.createProject(projectName, true);
+      console.log('Project created:', created);
+      if (created?.id) {
+        console.log('Starting video upload...');
+        await uploadVideoFile(created.id, file);
+        console.log('Video upload complete!');
+        console.log('Navigating to Trim stage...');
+        await router.push({ name: 'Trim', params: { id: created.id } });
+      } else {
+        console.error('Project creation failed - no ID returned');
+      }
     }
   } catch (error) {
     console.error('Failed to create project or upload video:', error);
@@ -158,6 +162,20 @@ const handleFileSelect = async (file: File) => {
     uploadingFileName.value = '';
   }
 };
+
+// On entering Upload stage for an existing project, route to Trim if video exists
+onMounted(async () => {
+  if (!routeProjectId) return;
+  try {
+    const { data } = await api.get(`/projects/${routeProjectId}`);
+    if (data?.video_path) {
+      console.log('Project already has a video; redirecting to Trim.');
+      await router.replace({ name: 'Trim', params: { id: routeProjectId } });
+    }
+  } catch (e) {
+    console.warn('Could not fetch project for upload route:', e);
+  }
+});
 </script>
 
 <style scoped>

@@ -49,10 +49,10 @@
         v-for="project in orderedProjects"
         :key="project.id"
         class="project-card"
-        :data-available="isStageAvailable(project.stage)"
+        :data-available="isStageAvailable(effectiveStage(project))"
         role="button"
         tabindex="0"
-        :title="isStageAvailable(project.stage) ? 'Open editor' : 'Editor coming soon for this stage'"
+        :title="isStageAvailable(effectiveStage(project)) ? 'Open editor' : 'Editor coming soon for this stage'"
         @click="goToStage(project)"
         @keydown.enter="goToStage(project)"
       >
@@ -60,9 +60,9 @@
           <div class="thumb__top">
             <span
               class="stage"
-              :data-tone="toneForStage(project.stage)"
+              :data-tone="toneForStage(effectiveStage(project))"
             >
-              {{ labelForStage(project.stage) }}
+              {{ labelForStage(effectiveStage(project)) }}
             </span>
             <span class="status" :data-active="project.active">
               {{ project.active ? 'Active' : 'Archived' }}
@@ -156,11 +156,21 @@ const gradientStyle = (project: Project) => {
 const labelForStage = (stage: ProjectStage): string => stageMeta[stage]?.label ?? 'Unknown stage';
 const toneForStage = (stage: ProjectStage): string => stageMeta[stage]?.tone ?? 'info';
 
-const isStageAvailable = (stage: ProjectStage): boolean => stage === 'upload';
+// Derive effective stage: if a video exists but stage is still 'upload', treat as 'trim'
+const effectiveStage = (project: Project): ProjectStage => {
+  if (project.stage === 'upload' && project.video_path) return 'trim';
+  return project.stage;
+};
+
+const isStageAvailable = (stage: ProjectStage): boolean => stage === 'upload' || stage === 'trim';
 
 const routeForProject = (project: Project) => {
-  if (project.stage === 'upload' && project.id) {
+  const eff = effectiveStage(project);
+  if (eff === 'upload' && project.id) {
     return { name: 'Upload', params: { id: project.id } };
+  }
+  if (eff === 'trim' && project.id) {
+    return { name: 'Trim', params: { id: project.id } };
   }
   return null;
 };

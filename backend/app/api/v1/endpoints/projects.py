@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.video_upload import VideoUploadService
-from app.models.project import Project
+from app.models.project import Project, ProjectStage
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -385,8 +386,9 @@ async def complete_video_upload(
         # Finalize upload (combine chunks, verify hash, cleanup temp files)
         _upload_service.finalize_upload(str(project_id), output_path)
 
-        # Update project with video path
+        # Update project with video path and advance stage to TRIM
         db_project.video_path = str(output_path)
+        db_project.stage = ProjectStage.TRIM.value
         db.add(db_project)
         await db.commit()
         await db.refresh(db_project)
@@ -424,6 +426,114 @@ async def complete_video_upload(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to finalize upload",
+        ) from e
+
+
+@router.get("/projects/{project_id}/video")
+async def get_project_video(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """Stream the uploaded video file for a project.
+
+    Returns the original uploaded video for preview/trim UI.
+
+    Args:
+        project_id: ID of the project
+        db: Database session dependency
+
+    Returns:
+        FileResponse: The video file response
+
+    Raises:
+        HTTPException: If project not found or video missing
+    """
+    try:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+
+        if not db_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found",
+            )
+
+        if not db_project.video_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No video uploaded for this project",
+            )
+
+        video_path = Path(db_project.video_path)
+        if not video_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Video file not found on server",
+            )
+
+        # Assume MP4 for now (upload finalization saves to original.mp4)
+        return FileResponse(str(video_path), media_type="video/mp4")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to stream video for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to stream video",
+        ) from e
+
+
+@router.post("/projects/{project_id}/trim", response_model=ProjectResponse)
+async def set_trim_range(
+    project_id: UUID,
+    trim_start: int,
+    trim_end: int,
+    db: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """Update the project's trim range with basic validation.
+
+    Args:
+        project_id: ID of the project
+        trim_start: Start position (units currently seconds or frames TBD)
+        trim_end: End position (must be greater than start)
+        db: Database session dependency
+
+    Returns:
+        ProjectResponse: The updated project
+
+    Raises:
+        HTTPException: If project not found or validation fails
+    """
+    try:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+        if not db_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found",
+            )
+
+        if trim_start < 0 or trim_end <= trim_start:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid trim range: ensure start >= 0 and end > start",
+            )
+
+        db_project.trim_start = trim_start
+        db_project.trim_end = trim_end
+        # Keep stage as TRIM; conversion/manual labeling will advance later
+        db.add(db_project)
+        await db.commit()
+        await db.refresh(db_project)
+        return ProjectResponse.model_validate(db_project)
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to set trim for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to set trim range",
         ) from e
 
 
