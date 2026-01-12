@@ -68,7 +68,7 @@ def test_apply_migrations_on_old_sqlite_db(tmp_path: Path) -> None:
     tables = set(inspector.get_table_names())
     assert _expected_tables().issubset(tables)
 
-    assert _has_fk(inspector, "labels", "project_id", "projects")
+    # Labels are now global - no project_id FK
     assert _has_fk(inspector, "images", "project_id", "projects")
     assert _has_fk(inspector, "labeled_points", "image_id", "images")
     assert _has_fk(inspector, "labeled_points", "label_id", "labels")

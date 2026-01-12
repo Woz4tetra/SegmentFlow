@@ -16,28 +16,19 @@ class TestLabelCreate:
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        # First create a project
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
-        # Create a label
+        # Create a global label
         label_payload = {
             "name": "Person",
             "color_hex": "#00FF00",
         }
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json=label_payload,
         )
         assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Person"
         assert data["color_hex"] == "#00FF00"
-        assert data["project_id"] == project_id
         assert data["thumbnail_path"] is None
 
     @pytest.mark.asyncio
@@ -46,32 +37,12 @@ class TestLabelCreate:
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
         # Invalid color format
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Car", "color_hex": "00FF00"},
         )
         assert resp.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_create_label_project_not_found(
-        self,
-        client: AsyncIterator[AsyncClient],
-        clean_db: AsyncIterator[None],
-    ) -> None:
-        fake_project = str(uuid4())
-        resp = await client.post(
-            f"/api/v1/projects/{fake_project}/labels",
-            json={"name": "Tree", "color_hex": "#00AA00"},
-        )
-        assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_create_label_with_thumbnail(
@@ -80,21 +51,14 @@ class TestLabelCreate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test creating label with thumbnail path."""
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
-        # Create label with thumbnail
+        # Create global label with thumbnail
         label_payload = {
             "name": "Person",
             "color_hex": "#00FF00",
             "thumbnail_path": "/path/to/thumb.png",
         }
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json=label_payload,
         )
         assert resp.status_code == 201
@@ -109,16 +73,9 @@ class TestLabelCreate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test creating label with empty name fails validation."""
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
         # Empty name should fail
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "", "color_hex": "#00FF00"},
         )
         assert resp.status_code == 422
@@ -130,51 +87,37 @@ class TestLabelCreate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test creating label without required fields fails."""
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
         # Missing name
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"color_hex": "#00FF00"},
         )
         assert resp.status_code == 422
 
         # Missing color_hex
         resp = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Person"},
         )
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_create_multiple_labels_same_project(
+    async def test_create_multiple_labels(
         self,
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        """Test creating multiple labels for the same project."""
-        proj_resp = await client.post(
-            "/api/v1/projects",
-            json={"name": "Labels Project"},
-        )
-        assert proj_resp.status_code == 201
-        project_id = proj_resp.json()["id"]
-
+        """Test creating multiple global labels."""
         # Create first label
         resp1 = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Person", "color_hex": "#00FF00"},
         )
         assert resp1.status_code == 201
 
         # Create second label
         resp2 = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Car", "color_hex": "#FF0000"},
         )
         assert resp2.status_code == 201
@@ -190,11 +133,9 @@ class TestLabelUpdate:
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        # Create project and label
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
+        # Create global label
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Car", "color_hex": "#FF0000"},
         )
         label_id = lab.json()["id"]
@@ -216,10 +157,8 @@ class TestLabelUpdate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test updating only the name field."""
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Car", "color_hex": "#FF0000"},
         )
         label_id = lab.json()["id"]
@@ -242,10 +181,8 @@ class TestLabelUpdate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test updating only the color field."""
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Car", "color_hex": "#FF0000"},
         )
         label_id = lab.json()["id"]
@@ -267,10 +204,8 @@ class TestLabelUpdate:
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Dog", "color_hex": "#0000FF"},
         )
         label_id = lab.json()["id"]
@@ -288,10 +223,8 @@ class TestLabelUpdate:
         client: AsyncIterator[AsyncClient],
         clean_db: AsyncIterator[None],
     ) -> None:
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Cat", "color_hex": "#00FF00"},
         )
         label_id = lab.json()["id"]
@@ -322,10 +255,8 @@ class TestLabelUpdate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test updating label with empty name fails validation."""
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Cat", "color_hex": "#00FF00"},
         )
         label_id = lab.json()["id"]
@@ -343,10 +274,8 @@ class TestLabelUpdate:
         clean_db: AsyncIterator[None],
     ) -> None:
         """Test updating all label fields at once."""
-        proj = await client.post("/api/v1/projects", json={"name": "Proj"})
-        project_id = proj.json()["id"]
         lab = await client.post(
-            f"/api/v1/projects/{project_id}/labels",
+            "/api/v1/labels",
             json={"name": "Cat", "color_hex": "#00FF00"},
         )
         label_id = lab.json()["id"]

@@ -55,7 +55,7 @@ async def test_schema_tables_and_fks_created() -> None:
                     for fk in fks
                 )
 
-            assert _has_fk("labels", "project_id", "projects")
+            # Labels are now global - no project_id FK
             assert _has_fk("images", "project_id", "projects")
             assert _has_fk("labeled_points", "image_id", "images")
             assert _has_fk("labeled_points", "label_id", "labels")
@@ -72,9 +72,10 @@ async def test_foreign_keys_enforced() -> None:
     """Inserting child rows without parents should violate FK constraints."""
 
     async with AsyncSessionLocal() as session:
-        bad_label = Label(project_id=uuid4(), name="orphan", color_hex="#ff0000")
+        # Labels are now global - test with images instead
+        bad_image = Image(project_id=uuid4(), frame_number=1, inference_path="/tmp/test.jpg")
 
-        session.add(bad_label)
+        session.add(bad_image)
         with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
@@ -82,11 +83,11 @@ async def test_foreign_keys_enforced() -> None:
 
 @pytest.mark.asyncio
 async def test_cascade_delete_removes_children() -> None:
-    """Deleting a project cascades to related labels, images, points, masks, stats."""
+    """Deleting a project cascades to related images, points, masks, stats (but not labels - they're global)."""
 
     async with AsyncSessionLocal() as session:
         project = Project(name="test-project")
-        label = Label(name="person", color_hex="#00ff00", project=project)
+        label = Label(name="person", color_hex="#00ff00")  # Global label - no project reference
         image = Image(project=project, frame_number=1, inference_path="/tmp/i.jpg")
         point = LabeledPoint(image=image, label=label, x=0.5, y=0.6, include=True)
         mask = Mask(image=image, label=label, contour_polygon={"points": []}, area=1.0)
@@ -99,9 +100,14 @@ async def test_cascade_delete_removes_children() -> None:
         await session.commit()
 
     async with AsyncSessionLocal() as session:
-        for model in (Project, Label, Image, LabeledPoint, Mask, Stats):
+        # Project and its children should be deleted
+        for model in (Project, Image, LabeledPoint, Mask, Stats):
             count = await session.scalar(select(func.count()).select_from(model))
             assert count == 0
+
+        # Label should still exist (global)
+        label_count = await session.scalar(select(func.count()).select_from(Label))
+        assert label_count == 1
 
 
 @pytest.mark.asyncio
