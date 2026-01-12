@@ -55,11 +55,6 @@ class Project(BaseModel):
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships
-    labels: Mapped[list["Label"]] = relationship(
-        "Label",
-        back_populates="project",
-        cascade="all, delete-orphan",
-    )
     images: Mapped[list["Image"]] = relationship(
         "Image",
         back_populates="project",

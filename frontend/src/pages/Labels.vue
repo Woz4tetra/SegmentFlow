@@ -2,21 +2,15 @@
   <section class="labels-page">
     <h2>Label Editor</h2>
     <div class="controls">
-      <label>
-        Project:
-        <select v-model="selectedProjectId" @change="onProjectChange">
-          <option :value="''" disabled>Select a project</option>
-          <option v-for="p in projectsStore.activeProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
-      </label>
-      <button class="refresh" @click="refreshLabels" :disabled="!selectedProjectId">Reload Labels</button>
-      <button class="add" @click="addLabel" :disabled="!selectedProjectId">Add Label</button>
+      <div class="spacer" />
+      <button class="btn btn-muted" @click="refreshLabels">Refresh</button>
+      <button class="btn btn-primary" @click="addLabel">+ New Label</button>
     </div>
 
     <div v-if="labelsStore.loading" class="status">Loading labels…</div>
     <div v-else-if="labelsStore.error" class="error">{{ labelsStore.error }}</div>
 
-    <table v-if="selectedProjectId" class="labels">
+    <table class="labels">
       <thead>
         <tr>
           <th style="width:36px">Color</th>
@@ -31,7 +25,7 @@
             <button class="color-btn" :style="{ background: lab.color_hex }" title="Edit Color" @click="openPicker(lab)" />
           </td>
           <td>
-            <input :value="lab.name" @change="(e: any) => renameLabel(lab, e.target.value)" />
+            <input class="text-input" :value="lab.name" @change="(e: any) => renameLabel(lab, e.target.value)" />
           </td>
           <td>
             <div class="thumb">
@@ -40,7 +34,7 @@
             </div>
           </td>
           <td>
-            <label class="upload">
+            <label class="btn btn-muted file-btn">
               <input type="file" accept="image/png,image/jpeg" @change="(e: any) => onThumbUpload(lab, e)" />
               Upload Thumbnail
             </label>
@@ -55,31 +49,25 @@
 
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue';
-import { useProjectsStore } from '../stores/projects';
 import { useLabelsStore, parseColorInput } from '../stores/labels';
 import ColorPicker from '../components/ColorPicker.vue';
 
-const projectsStore = useProjectsStore();
 const labelsStore = useLabelsStore();
 
-const selectedProjectId = ref<string>('');
 const pickerOpen = ref(false);
 const pickerColor = ref<string>('#FFFFFF');
 let pickerTargetId: string | null = null;
 
 onMounted(async () => {
-  if (!projectsStore.projects.length) await projectsStore.fetchProjects();
+  await labelsStore.listLabels();
 });
 
-async function onProjectChange() {
-  if (selectedProjectId.value) await labelsStore.listLabels(selectedProjectId.value);
-}
-async function refreshLabels() { if (selectedProjectId.value) await labelsStore.listLabels(selectedProjectId.value); }
+async function refreshLabels() { await labelsStore.listLabels(); }
 
 async function addLabel() {
   const name = prompt('New label name:')?.trim();
   if (!name) return;
-  await labelsStore.createLabel(selectedProjectId.value, name);
+  await labelsStore.createLabel(name);
 }
 
 async function renameLabel(lab: any, name: string) {
@@ -112,18 +100,22 @@ async function onThumbUpload(lab: any, e: Event) {
 
 <style scoped>
 .labels-page { display: flex; flex-direction: column; gap: 1rem; }
-.controls { display: flex; gap: 0.6rem; align-items: center; }
-.controls select { border: 1px solid var(--border,#dfe3ec); border-radius: 8px; padding: 0.3rem 0.5rem; }
-.controls .add, .controls .refresh { border: 1px solid var(--border,#dfe3ec); background: var(--surface-muted,#eef2f7); border-radius: 8px; padding: 0.3rem 0.6rem; cursor: pointer; }
+.controls { display: flex; gap: 0.6rem; align-items: center; justify-content: flex-end; }
+.spacer { flex: 1; }
+.btn { border: 1px solid var(--border,#dfe3ec); border-radius: 10px; padding: 0.45rem 0.8rem; cursor: pointer; transition: background var(--transition-duration,.2s), box-shadow var(--transition-duration,.2s); color: var(--text,#0f172a); }
+.btn-muted { background: var(--surface-muted,#eef2f7); color: var(--text,#0f172a); }
+.btn-primary { background: linear-gradient(135deg, #6f7bf7, #8f5cf7); color: white; border: none; box-shadow: 0 8px 24px rgba(143, 92, 247, .25); }
+.btn:hover { box-shadow: 0 8px 24px rgba(0,0,0,.06); }
 .status { color: #64748B; }
 .error { color: #EF4444; }
 .table-actions { display: flex; gap: 0.4rem; }
 .labels { width: 100%; border-collapse: collapse; }
 .labels th, .labels td { border-bottom: 1px solid var(--border,#e5e7eb); padding: 0.4rem; }
 .color-btn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; }
+.text-input { width: 100%; font-family: var(--font); font-size: 0.95rem; line-height: 1.25rem; padding: 0.45rem 0.6rem; border: 1px solid var(--border,#dfe3ec); border-radius: 10px; background: var(--surface,#fff); color: var(--text,#0f172a); transition: box-shadow var(--transition-duration,.2s), border-color var(--transition-duration,.2s); }
+.text-input:focus { outline: none; box-shadow: 0 8px 24px rgba(0,0,0,.06); border-color: #c9cfe0; }
 .thumb { width: 120px; height: 60px; display: grid; place-items: center; border: 1px dashed var(--border,#dfe3ec); border-radius: 8px; overflow: hidden; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .placeholder { color: #64748B; font-size: 0.85rem; }
-.upload input { display: none; }
-.upload { border: 1px solid var(--border,#dfe3ec); background: var(--surface-muted,#eef2f7); border-radius: 8px; padding: 0.3rem 0.6rem; cursor: pointer; }
+.file-btn input { display: none; }
 </style>

@@ -79,10 +79,10 @@ export const useLabelsStore = defineStore('labels', {
     error: '' as string,
   }),
   actions: {
-    async listLabels(projectId: string): Promise<Label[]> {
+    async listLabels(): Promise<Label[]> {
       this.loading = true; this.error = '';
       try {
-        const { data } = await api.get<Label[]>(`/projects/${projectId}/labels`);
+        const { data } = await api.get<Label[]>(`/labels`);
         this.labels = data ?? [];
         return this.labels;
       } catch (err) {
@@ -92,10 +92,10 @@ export const useLabelsStore = defineStore('labels', {
         this.error = msg; return [];
       } finally { this.loading = false; }
     },
-    async createLabel(projectId: string, name: string, colorHex?: string): Promise<Label | null> {
+    async createLabel(name: string, colorHex?: string): Promise<Label | null> {
       try {
         const color = (colorHex && parseColorInput(colorHex)) || randomPaletteHex();
-        const { data } = await api.post<Label>(`/projects/${projectId}/labels`, { name, color_hex: color });
+        const { data } = await api.post<Label>(`/labels`, { name, color_hex: color });
         this.labels = [...this.labels, data];
         return data;
       } catch (err) {

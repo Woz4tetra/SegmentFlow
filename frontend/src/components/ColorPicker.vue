@@ -1,5 +1,5 @@
 <template>
-  <div v-if="open" class="overlay" @click.self="close">
+  <div v-show="open" class="overlay" @click.self="close">
     <div class="panel">
       <header class="header">
         <strong>Pick Color</strong>
@@ -127,10 +127,10 @@ function generateGridPalette(): string[] {
 
 <style scoped>
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: grid; place-items: center; z-index: 50; }
-.panel { width: 760px; max-width: 98vw; background: var(--surface, #fff); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.12); padding: 0.75rem; }
+.panel { width: 900px; max-width: 98vw; background: var(--surface, #fff); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.12); padding: 0.75rem; }
 .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
 .close { border: none; background: transparent; cursor: pointer; font-size: 1rem; }
-.content { display: grid; grid-template-columns: 1fr 520px; gap: 1rem; align-items: start; }
+.content { display: grid; grid-template-columns: 360px 520px; gap: 1rem; align-items: start; }
 .picker-wrapper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; align-items: start; justify-items: center; }
 .picker { margin: 0.25rem 0 0.5rem; }
 .inputs { display: flex; flex-direction: column; gap: 0.5rem; }
