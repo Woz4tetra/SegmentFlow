@@ -1,4 +1,7 @@
 <template>
+  <!-- Stage Navigation -->
+  <StageNavigation v-if="project" :project="project" />
+
   <!-- Top hero: same width and style approach as Home hero -->
   <section class="hero">
     <router-link to="/" class="ghost btn-icon" title="Back to Projects">
@@ -41,16 +44,30 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useProjectsStore } from '../stores/projects';
 import FileUpload from '../components/FileUpload.vue';
+import StageNavigation from '../components/StageNavigation.vue';
 import axios from 'axios';
+
+interface Project {
+  id: string;
+  name: string;
+  stage: string;
+  upload_visited: boolean;
+  trim_visited: boolean;
+  manual_labeling_visited: boolean;
+  propagation_visited: boolean;
+  validation_visited: boolean;
+  export_visited: boolean;
+}
 
 const router = useRouter();
 const route = useRoute();
 const routeProjectId = route.params.id ? String(route.params.id) : '';
 const projectsStore = useProjectsStore();
+const project = ref<Project | null>(null);
 const isCreatingProject = ref(false);
 const isConverting = ref(false);
 const uploadProgress = ref(0);
@@ -68,6 +85,25 @@ const conversionProgressPercent = computed(() => {
   if (conversionProgress.value.total === 0) return 0;
   return Math.round((conversionProgress.value.saved / conversionProgress.value.total) * 100);
 });
+
+async function fetchProject(): Promise<void> {
+  if (!routeProjectId) return;
+  try {
+    const { data } = await api.get<Project>(`/projects/${routeProjectId}`);
+    project.value = data;
+  } catch (error) {
+    console.error('Failed to fetch project:', error);
+  }
+}
+
+async function markStageVisited(): Promise<void> {
+  if (!routeProjectId) return;
+  try {
+    await api.post(`/projects/${routeProjectId}/mark_stage_visited?stage=upload`);
+  } catch (error) {
+    console.error('Failed to mark stage as visited:', error);
+  }
+}
 
 async function computeFileHash(file: File): Promise<string> {
   console.log('Computing file hash...');
@@ -279,6 +315,11 @@ const handleFileSelect = async (file: File) => {
 // On entering Upload stage for an existing project, route to Trim if video exists
 onMounted(async () => {
   if (!routeProjectId || routeProjectId === 'new') return;
+  
+  // Fetch project for stage navigation
+  await fetchProject();
+  await markStageVisited();
+  
   try {
     const { data } = await api.get(`/projects/${routeProjectId}`);
     if (data?.video_path) {

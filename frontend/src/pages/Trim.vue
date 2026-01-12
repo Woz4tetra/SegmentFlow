@@ -1,4 +1,7 @@
 <template>
+  <!-- Stage Navigation -->
+  <StageNavigation v-if="project" :project="project" />
+
   <section class="hero">
     <router-link :to="{ name: 'Home' }" class="ghost btn-icon" title="Back to Projects">
       <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -10,7 +13,7 @@
       <p class="eyebrow">Stage: Trim</p>
       <h1>Trim & Preview</h1>
       <p class="lede">
-        Select the start and end positions. The previews update to show the chosen start and end frames. Click "Save Trim" to proceed to labeling.
+        Select the start and end positions. The previews update to show the chosen start and end frames. Click "Start Manual Labeling" to proceed.
       </p>
     </div>
   </section>
@@ -62,7 +65,13 @@
           <p class="hint" v-if="validationError">{{ validationError }}</p>
 
           <div class="actions">
-            <button class="primary large" disabled>Start Manual Labeling</button>
+            <button 
+              class="primary large" 
+              @click="startManualLabeling"
+              :disabled="!canStartLabeling"
+            >
+              Start Manual Labeling
+            </button>
           </div>
         </div>
         <div v-else class="loading">Waiting for video metadata…</div>
@@ -76,6 +85,7 @@ import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import DualRangeSlider from '../components/DualRangeSlider.vue';
+import StageNavigation from '../components/StageNavigation.vue';
 
 interface Project {
   id: string;
@@ -87,6 +97,12 @@ interface Project {
   stage: string;
   created_at: string;
   updated_at: string;
+  upload_visited: boolean;
+  trim_visited: boolean;
+  manual_labeling_visited: boolean;
+  propagation_visited: boolean;
+  validation_visited: boolean;
+  export_visited: boolean;
 }
 
 const route = useRoute();
@@ -130,6 +146,26 @@ function validate(): string | '' {
 
 const validationError = computed(() => validate());
 
+const canStartLabeling = computed(() => {
+  // Can start labeling if conversion is complete (not in progress) and no validation errors
+  return !conversionInProgress.value && !validationError.value && conversionTotal.value > 0;
+});
+
+async function startManualLabeling(): Promise<void> {
+  if (!canStartLabeling.value) return;
+  
+  try {
+    // Mark trim stage as visited and update stage to manual_labeling
+    await api.post(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    await api.patch(`/projects/${projectId}`, { stage: 'manual_labeling' });
+    
+    // Navigate to manual labeling page
+    router.push({ name: 'ManualLabeling', params: { id: projectId } });
+  } catch (error) {
+    console.error('Failed to start manual labeling:', error);
+  }
+}
+
 async function fetchVideoInfo() {
   const { data } = await api.get<{ fps: number; frame_count: number; width: number; height: number; duration: number }>(`/projects/${projectId}/video_info`);
   duration.value = data?.duration ?? 0;
@@ -156,6 +192,14 @@ async function saveTrim() {
     });
   } catch (e) {
     console.error('Failed to save trim', e);
+  }
+}
+
+async function markStageVisited(): Promise<void> {
+  try {
+    await api.post(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+  } catch (error) {
+    console.error('Failed to mark stage as visited:', error);
   }
 }
 
@@ -199,6 +243,7 @@ function stopConversionPolling() {
 onMounted(async () => {
   try {
     await fetchProject();
+    await markStageVisited();
     await fetchVideoInfo();
     
     // Check if conversion is still in progress

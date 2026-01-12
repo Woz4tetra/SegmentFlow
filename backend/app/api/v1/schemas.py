@@ -104,6 +104,14 @@ class ProjectResponse(ProjectBase):
     locked_by: str | None = None
     created_at: datetime
     updated_at: datetime
+    
+    # Stage visited tracking
+    upload_visited: bool = False
+    trim_visited: bool = False
+    manual_labeling_visited: bool = False
+    propagation_visited: bool = False
+    validation_visited: bool = False
+    export_visited: bool = False
 
     model_config = {"from_attributes": True}
 
