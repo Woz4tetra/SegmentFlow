@@ -10,7 +10,6 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.image import Image
-    from app.models.label import Label
     from app.models.stats import Stats
 
 
@@ -55,11 +54,6 @@ class Project(BaseModel):
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships
-    labels: Mapped[list["Label"]] = relationship(
-        "Label",
-        back_populates="project",
-        cascade="all, delete-orphan",
-    )
     images: Mapped[list["Image"]] = relationship(
         "Image",
         back_populates="project",

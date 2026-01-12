@@ -177,7 +177,6 @@ class LabelResponse(LabelBase):
     """Schema for label response."""
 
     id: UUID
-    project_id: UUID
     created_at: datetime
     updated_at: datetime
 
