@@ -176,30 +176,47 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
     }
   };
   
-  // Initial poll
-  let done = await pollConversion();
-  
-  // If not done, set up polling interval
-  if (!done) {
-    conversionPollInterval = setInterval(async () => {
-      done = await pollConversion();
-      if (done) {
-        clearInterval(conversionPollInterval!);
+  // Wait for conversion to complete or timeout after 5 minutes
+  const timeout = 5 * 60 * 1000; // 5 minutes
+  let done = false;
+
+  await new Promise<void>((resolve) => {
+    const startTime = Date.now();
+
+    const finish = () => {
+      if (conversionPollInterval) {
+        clearInterval(conversionPollInterval);
         conversionPollInterval = null;
       }
-    }, 500); // Poll every 500ms
-  }
-  
-  // Wait for conversion to complete or timeout after 5 minutes
-  const startTime = Date.now();
-  const timeout = 5 * 60 * 1000; // 5 minutes
-  while (isConverting.value && Date.now() - startTime < timeout) {
-    if (conversionProgress.value.total > 0 && conversionProgress.value.saved >= conversionProgress.value.total) {
-      break;
+      resolve();
+    };
+
+    const timeoutId = setTimeout(() => {
+      console.warn('Image conversion timed out after 5 minutes.');
+      finish();
+    }, timeout);
+
+    const pollAndCheck = async () => {
+      done = await pollConversion();
+      if (done) {
+        clearTimeout(timeoutId);
+        finish();
+      } else if (Date.now() - startTime >= timeout) {
+        // Safety check in case timeout fires slightly later
+        clearTimeout(timeoutId);
+        console.warn('Image conversion timed out after 5 minutes.');
+        finish();
+      }
+    };
+
+    // Initial poll
+    pollAndCheck();
+
+    // If not done, set up polling interval
+    if (!done) {
+      conversionPollInterval = setInterval(pollAndCheck, 500); // Poll every 500ms
     }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  
+  });
   isConverting.value = false;
   uploadProgress.value = 100;
   console.log('Image conversion complete!');
