@@ -3,7 +3,6 @@ import { defineStore } from 'pinia';
 
 export interface Label {
   id: string;
-  project_id: string;
   name: string;
   color_hex: string; // #RRGGBB
   thumbnail_path?: string | null;

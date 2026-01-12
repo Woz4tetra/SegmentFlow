@@ -29,7 +29,7 @@
           </td>
           <td>
             <div class="thumb">
-              <img v-if="lab.thumbnail_path" :src="lab.thumbnail_path" alt="Thumbnail" />
+              <img v-if="lab.thumbnail_path" :src="`${lab.thumbnail_path}?t=${Date.now()}`" alt="Thumbnail" />
               <span v-else class="placeholder">No thumbnail</span>
             </div>
           </td>
@@ -65,8 +65,16 @@ onMounted(async () => {
 async function refreshLabels() { await labelsStore.listLabels(); }
 
 async function addLabel() {
-  const name = prompt('New label name:')?.trim();
-  if (!name) return;
+  const base = 'Label ';
+  const nums = labelsStore.labels
+    .map((l) => l.name)
+    .map((n) => {
+      const m = n.match(/^Label\s+(\d+)$/);
+      return m ? Number(m[1]) : null;
+    })
+    .filter((n): n is number => n !== null);
+  const next = nums.length ? Math.max(...nums) + 1 : labelsStore.labels.length + 1;
+  const name = `${base}${next}`;
   await labelsStore.createLabel(name);
 }
 
@@ -93,8 +101,14 @@ async function onThumbUpload(lab: any, e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  await labelsStore.uploadThumbnail(lab.id, file);
-  input.value = '';
+  console.log(`Uploading thumbnail for label ${lab.id}...`);
+  const result = await labelsStore.uploadThumbnail(lab.id, file);
+  if (result) {
+    console.log('Thumbnail uploaded successfully:', result);
+    input.value = '';
+  } else {
+    console.error('Thumbnail upload failed:', labelsStore.error);
+  }
 }
 </script>
 

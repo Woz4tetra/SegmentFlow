@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,7 @@ async def list_labels(
     db: AsyncSession = Depends(get_db),
 ) -> list[LabelResponse]:
     """List all global labels."""
-    label_result = await db.execute(select(Label))
+    label_result = await db.execute(select(Label).order_by(Label.created_at))
     labels = label_result.scalars().all()
     return [LabelResponse.model_validate(l) for l in labels]
 
@@ -97,6 +97,7 @@ async def update_label(
 )
 async def upload_label_thumbnail(
     label_id: UUID,
+    request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> LabelResponse:
@@ -141,7 +142,8 @@ async def upload_label_thumbnail(
         ) from e
 
     # Update label thumbnail_path to served route
-    db_label.thumbnail_path = f"/api/v1/labels/{label_id}/thumbnail"
+    base_url = str(request.base_url).rstrip("/") if request else ""
+    db_label.thumbnail_path = f"{base_url}{settings.API_V1_STR}/labels/{label_id}/thumbnail"
     try:
         db.add(db_label)
         await db.commit()
