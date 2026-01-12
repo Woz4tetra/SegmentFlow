@@ -1,20 +1,20 @@
 """Label endpoints for CRUD operations."""
 
+from pathlib import Path
 from uuid import UUID
 
-from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas import LabelCreate, LabelResponse, LabelUpdate
-from app.core.database import get_db
 from app.core.config import settings
+from app.core.database import get_db
 from app.models.label import Label
-from app.models.project import Project
 
 router = APIRouter()
+
 
 @router.get(
     "/labels",
@@ -26,7 +26,7 @@ async def list_labels(
     """List all global labels."""
     label_result = await db.execute(select(Label).order_by(Label.created_at))
     labels = label_result.scalars().all()
-    return [LabelResponse.model_validate(l) for l in labels]
+    return [LabelResponse.model_validate(label) for label in labels]
 
 
 @router.post(

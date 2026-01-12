@@ -10,7 +10,6 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.image import Image
-    from app.models.label import Label
     from app.models.stats import Stats
 
 
