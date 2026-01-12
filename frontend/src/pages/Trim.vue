@@ -107,7 +107,7 @@ const previewEndUrl = computed(() => `${baseApi}/projects/${projectId}/preview_f
 const conversionSaved = ref(0);
 const conversionTotal = ref(0);
 const conversionInProgress = ref(false);
-let conversionPollInterval: ReturnType<typeof setInterval> | null = null;
+let conversionPollInterval: number | null = null;
 
 const conversionPercent = computed(() => {
   if (conversionTotal.value === 0) return 0;
