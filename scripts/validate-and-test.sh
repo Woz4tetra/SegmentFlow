@@ -91,7 +91,7 @@ format_backend_fix() {
     fi
     
     # --fix covers lint codes (including RUF022, UP037) and import cleanup; format handles spacing
-    if cd "$BACKEND_DIR" && ruff check --fix . && ruff format .; then
+    if cd "$BACKEND_DIR" && ruff check --fix --unsafe-fixes . && ruff format .; then
         print_success "Lint and format auto-fix applied"
         cd ..
     else

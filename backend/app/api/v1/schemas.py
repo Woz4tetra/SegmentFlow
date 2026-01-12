@@ -44,8 +44,8 @@ class ProjectUpdate(BaseModel):
         description="Project name",
     )
     stage: str | None = Field(None, description="Current project stage")
-    trim_start: int | None = Field(None, description="Start frame for trimmed video")
-    trim_end: int | None = Field(None, description="End frame for trimmed video")
+    trim_start: float | None = Field(None, description="Start time for trimmed video in seconds")
+    trim_end: float | None = Field(None, description="End time for trimmed video in seconds")
     video_path: str | None = Field(None, description="Path to uploaded video file")
     locked_by: str | None = Field(
         None,
@@ -98,8 +98,8 @@ class ProjectResponse(ProjectBase):
 
     id: UUID
     video_path: str | None = None
-    trim_start: int | None = None
-    trim_end: int | None = None
+    trim_start: float | None = None
+    trim_end: float | None = None
     stage: str
     locked_by: str | None = None
     created_at: datetime

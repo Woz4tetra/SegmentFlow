@@ -18,12 +18,22 @@
 
   <!-- Main upload card: full-width like Home hero card -->
   <section class="content">
+    <div v-if="errorMessage" class="error-banner">
+      <img
+        src="/error_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg"
+        alt="Error icon"
+        class="error-banner__icon"
+        width="20"
+        height="20"
+      />
+      <span>{{ errorMessage }}</span>
+    </div>
     <div class="upload-card">
       <FileUpload
-        :disabled="isCreatingProject"
-        :is-uploading="isCreatingProject"
+        :disabled="isCreatingProject || isConverting"
+        :is-uploading="isCreatingProject || isConverting"
         :upload-progress="uploadProgress"
-        :uploading-file-name="uploadingFileName"
+        :uploading-file-name="uploadMessage"
         @file-selected="handleFileSelect"
       />
     </div>
@@ -31,24 +41,34 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted, computed } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { useProjectsStore } from '../stores/projects';
 import FileUpload from '../components/FileUpload.vue';
 import axios from 'axios';
 
 const router = useRouter();
+const route = useRoute();
+const routeProjectId = route.params.id ? String(route.params.id) : '';
 const projectsStore = useProjectsStore();
 const isCreatingProject = ref(false);
+const isConverting = ref(false);
 const uploadProgress = ref(0);
-const uploadingFileName = ref('');
+const uploadMessage = ref('');
+const errorMessage = ref('');
+const conversionProgress = ref({ saved: 0, total: 0 });
+let conversionPollInterval: number | null = null;
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
   timeout: 30000,
 });
 
-// Compute SHA-256 hash of file contents (browser compatible)
+const conversionProgressPercent = computed(() => {
+  if (conversionProgress.value.total === 0) return 0;
+  return Math.round((conversionProgress.value.saved / conversionProgress.value.total) * 100);
+});
+
 async function computeFileHash(file: File): Promise<string> {
   console.log('Computing file hash...');
   const buffer = await file.arrayBuffer();
@@ -68,7 +88,7 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
   
   // Reset progress
   uploadProgress.value = 0;
-  uploadingFileName.value = file.name;
+  uploadMessage.value = "Uploading video...";
   
   // Compute file hash (1-5% progress)
   console.log('Computing file hash...');
@@ -83,12 +103,13 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
       total_chunks: totalChunks,
       total_size: file.size,
       file_hash: fileHash,
+      original_name: file.name,
     },
   });
   console.log('Upload session initialized');
   uploadProgress.value = 10;
   
-  // Upload chunks (10-90% progress)
+  // Upload chunks (10-50% progress)
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -104,19 +125,101 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     
-    // Update progress: 10% to 90% based on chunks uploaded
-    const chunkProgress = ((i + 1) / totalChunks) * 80;
+    // Update progress: 10% to 50% based on chunks uploaded
+    const chunkProgress = ((i + 1) / totalChunks) * 40;
     uploadProgress.value = 10 + Math.round(chunkProgress);
     
     console.log(`Chunk ${i} uploaded successfully`);
   }
   
-  // Complete upload (90-100% progress)
-  uploadProgress.value = 90;
+  // Complete upload (50-55% progress)
+  uploadProgress.value = 50;
   console.log('Completing upload...');
   await api.post(`/projects/${projectId}/upload/complete`);
+  uploadProgress.value = 55;
+  console.log('Upload completed successfully! Waiting for image conversion...');
+  
+  // Poll for conversion progress (55-95% progress)
+  isConverting.value = true;
+  conversionProgress.value = { saved: 0, total: 0 };
+  uploadMessage.value = 'Converting video to images...';
+  
+  const pollConversion = async () => {
+    try {
+      const { data } = await api.get(`/projects/${projectId}/conversion/progress`);
+      conversionProgress.value = data;
+      
+      // Check if conversion failed
+      if (data.error) {
+        if (conversionPollInterval) clearInterval(conversionPollInterval);
+        isConverting.value = false;
+        errorMessage.value = 'Video upload failed. Please try again with a different video file.';
+        return false;
+      }
+      
+      if (data.total > 0) {
+        // Map 55-95% to conversion progress
+        const conversionPercent = (data.saved / data.total) * 40;
+        uploadProgress.value = Math.round(Math.min(55 + conversionPercent, 94));
+      }
+      
+      // Check if conversion is done (saved === total and both > 0)
+      if (data.total > 0 && data.saved >= data.total) {
+        uploadProgress.value = 95;
+        if (conversionPollInterval) clearInterval(conversionPollInterval);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn('Could not fetch conversion progress:', e);
+      return false;
+    }
+  };
+  
+  // Wait for conversion to complete or timeout after 5 minutes
+  const timeout = 5 * 60 * 1000; // 5 minutes
+  let done = false;
+
+  await new Promise<void>((resolve) => {
+    const startTime = Date.now();
+
+    const finish = () => {
+      if (conversionPollInterval) {
+        clearInterval(conversionPollInterval);
+        conversionPollInterval = null;
+      }
+      resolve();
+    };
+
+    const timeoutId = setTimeout(() => {
+      console.warn('Image conversion timed out after 5 minutes.');
+      finish();
+    }, timeout);
+
+    const pollAndCheck = async () => {
+      done = await pollConversion();
+      if (done) {
+        clearTimeout(timeoutId);
+        finish();
+      } else if (Date.now() - startTime >= timeout) {
+        // Safety check in case timeout fires slightly later
+        clearTimeout(timeoutId);
+        console.warn('Image conversion timed out after 5 minutes.');
+        finish();
+      }
+    };
+
+    // Initial poll
+    pollAndCheck();
+
+    // If not done, set up polling interval
+    if (!done) {
+      conversionPollInterval = setInterval(pollAndCheck, 500); // Poll every 500ms
+    }
+  });
+  isConverting.value = false;
   uploadProgress.value = 100;
-  console.log('Upload completed successfully!');
+  console.log('Image conversion complete!');
 }
 
 const handleFileSelect = async (file: File) => {
@@ -127,37 +230,65 @@ const handleFileSelect = async (file: File) => {
     return;
   }
   
-  // Extract filename without extension as project name
-  const filename = file.name.replace(/\.[^/.]+$/, '');
-  const projectName = filename || 'Untitled Project';
-  console.log('Creating project with name:', projectName);
+  // Clear any previous error message
+  errorMessage.value = '';
   
   isCreatingProject.value = true;
   try {
-    // Step 1: Create project
-    const created = await projectsStore.createProject(projectName, true);
-    console.log('Project created:', created);
-    
-    if (created?.id) {
-      // Step 2: Upload the video file
-      console.log('Starting video upload...');
-      await uploadVideoFile(created.id, file);
-      console.log('Video upload complete!');
-      
-      // Step 3: Navigate to the project (or next stage)
-      console.log('Navigating to project...');
-      await router.push({ name: 'Home' });
+    if (routeProjectId && routeProjectId !== 'new') {
+      // Existing project: upload video to this project
+      console.log('Uploading to existing project:', routeProjectId);
+      await uploadVideoFile(routeProjectId, file);
+      if (errorMessage.value.length === 0) {
+        console.log('Video upload complete!');
+        await router.push({ name: 'Trim', params: { id: routeProjectId } });
+      } else {
+        console.log('Video upload failed...');
+      }
     } else {
-      console.error('Project creation failed - no ID returned');
+      // No project in route: create a new project from file name
+      const filename = file.name.replace(/\.[^/.]+$/, '');
+      const projectName = filename || 'Untitled Project';
+      console.log('Creating project with name:', projectName);
+      const created = await projectsStore.createProject(projectName, true);
+      console.log('Project created:', created);
+      if (created?.id) {
+        console.log('Starting video upload...');
+        await uploadVideoFile(created.id, file);
+        if (errorMessage.value.length === 0) {
+          console.log('Video upload complete!');
+          console.log('Navigating to Trim stage...');
+          await router.push({ name: 'Trim', params: { id: created.id } });
+        } else {
+          console.log('Video upload failed...');
+        }
+      } else {
+        console.error('Project creation failed - no ID returned');
+      }
     }
   } catch (error) {
     console.error('Failed to create project or upload video:', error);
+    errorMessage.value = 'Failed to upload video. Please try again.';
   } finally {
     isCreatingProject.value = false;
     uploadProgress.value = 0;
-    uploadingFileName.value = '';
+    uploadMessage.value = '';
   }
 };
+
+// On entering Upload stage for an existing project, route to Trim if video exists
+onMounted(async () => {
+  if (!routeProjectId || routeProjectId === 'new') return;
+  try {
+    const { data } = await api.get(`/projects/${routeProjectId}`);
+    if (data?.video_path) {
+      console.log('Project already has a video; redirecting to Trim.');
+      await router.replace({ name: 'Trim', params: { id: routeProjectId } });
+    }
+  } catch (e) {
+    console.warn('Could not fetch project for upload route:', e);
+  }
+});
 </script>
 
 <style scoped>
@@ -220,6 +351,23 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 12px;
+  color: #991b1b;
+  font-weight: 500;
+}
+
+.error-banner__icon {
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 @media (max-width: 900px) {

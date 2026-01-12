@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, Float, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -44,8 +44,8 @@ class Project(BaseModel):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    trim_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    trim_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)
     stage: Mapped[str] = mapped_column(
         String(50),
         default=ProjectStage.UPLOAD,

@@ -5,7 +5,7 @@ description = "AI-assisted video segmentation labeling tool with SAM3"
 authors = [
     { name = "SegmentFlow Team" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.128.0",
     "uvicorn[standard]==0.40.0",
@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart==0.0.21",
     "marshmallow==4.2.0",
     "dacite==1.9.2",
+    "opencv-python-headless==4.12.0.88",
 ]
 
 [project.optional-dependencies]
@@ -34,9 +35,15 @@ dev = [
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# Only package the application code under 'app'; exclude data, tests, coverage outputs, and egg-info.
+where = ["."]
+include = ["app*"]
+exclude = ["data*", "tests*", "htmlcov*", "segmentflow.egg-info*"]
+
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 exclude = [
     ".git",
     "__pycache__",
@@ -82,7 +89,7 @@ known-third-party = [
 "app/api/v1/endpoints/*.py" = ["B008"]  # Allow FastAPI Depends in defaults only here
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 warn_redundant_casts = true
