@@ -310,7 +310,7 @@ onUnmounted(() => {
 <style scoped>
 .manual-labeling-page {
   min-height: 100vh;
-  background: #ffffff;
+  background: var(--bg, #f5f7fb);
 }
 
 .hero {
@@ -319,9 +319,9 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 1rem;
   padding: 1.25rem 1.5rem;
-  border: 1px solid #dfe3ec;
+  border: 1px solid var(--border, #dfe3ec);
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(99, 102, 241, 0.04)),
-    #ffffff;
+    var(--surface, #ffffff);
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
   margin: 1rem 1.25rem 0;
@@ -335,7 +335,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   padding: 1.5rem 1.25rem;
-  background: #ffffff;
+  background: var(--bg, #f5f7fb);
 }
 
 .hero__text {
@@ -347,7 +347,7 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   font-weight: 700;
   font-size: 0.8rem;
-  color: #5b6474;
+  color: var(--muted, #5b6474);
   margin: 0 0 0.35rem;
 }
 
@@ -355,12 +355,12 @@ h1 {
   margin: 0 0 0.25rem;
   font-size: 2rem;
   letter-spacing: -0.02em;
-  color: #0f172a;
+  color: var(--text, #0f172a);
 }
 
 .lede {
   margin: 0;
-  color: #4b5563;
+  color: var(--muted, #4b5563);
   line-height: 1.6;
   font-size: 0.95rem;
 }
@@ -370,7 +370,7 @@ h1 {
   justify-content: center;
   align-items: center;
   padding: 4rem;
-  color: #4b5563;
+  color: var(--muted, #4b5563);
 }
 
 .labeling-container {
@@ -393,10 +393,10 @@ h1 {
   align-items: center;
   justify-content: center;
   height: 700px;
-  background: linear-gradient(135deg, #f8f9fa, #eef2f7);
-  border: 2px dashed #dfe3ec;
+  background: var(--surface-muted, #eef2f7);
+  border: 2px dashed var(--border, #dfe3ec);
   border-radius: 16px;
-  color: #6b7280;
+  color: var(--muted, #6b7280);
   font-size: 1rem;
   font-weight: 500;
 }
@@ -412,13 +412,13 @@ h1 {
   align-items: center;
   gap: 0.5rem;
   padding: 0.65rem 1.2rem;
-  background: #ffffff;
-  border: 1px solid #dfe3ec;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
   border-radius: 12px;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.9rem;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
@@ -445,8 +445,8 @@ h1 {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1.25rem;
-  background: #ffffff;
-  border: 1px solid #dfe3ec;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
   border-radius: 16px;
   height: fit-content;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
@@ -461,12 +461,12 @@ h1 {
 .control-section h3 {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin: 0;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border, #e5e7eb);
 }
 
 .frame-nav {
@@ -477,10 +477,10 @@ h1 {
 .frame-input {
   flex: 1;
   padding: 0.65rem 0.9rem;
-  border: 1px solid #dfe3ec;
+  border: 1px solid var(--border, #dfe3ec);
   border-radius: 10px;
-  background: #ffffff;
-  color: #0f172a;
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
   font-size: 0.9rem;
   font-weight: 500;
   transition: all 0.2s ease;
@@ -493,7 +493,7 @@ h1 {
 }
 
 .frame-input::placeholder {
-  color: #9ca3af;
+  color: var(--muted, #9ca3af);
 }
 
 .nav-buttons {
@@ -510,13 +510,13 @@ h1 {
 
 .btn-nav {
   padding: 0.85rem 1rem;
-  background: linear-gradient(135deg, #ffffff, #f3f4f6);
-  border: 1.5px solid #dfe3ec;
+  background: var(--surface-muted, #f3f4f6);
+  border: 1.5px solid var(--border, #dfe3ec);
   border-radius: 12px;
   cursor: pointer;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -542,7 +542,7 @@ h1 {
 .btn-nav .hotkey {
   margin-left: auto;
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--muted, #9ca3af);
   font-weight: 500;
 }
 
@@ -577,13 +577,13 @@ h1 {
 .btn-sm {
   flex: 1;
   padding: 0.75rem 0.9rem;
-  background: linear-gradient(135deg, #f3f4f6, #ffffff);
-  border: 1px solid #dfe3ec;
+  background: var(--surface-muted, #f3f4f6);
+  border: 1px solid var(--border, #dfe3ec);
   border-radius: 10px;
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -612,7 +612,7 @@ h1 {
 
 .hotkey {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--muted, #9ca3af);
   font-weight: 500;
   margin-left: 0.2rem;
   opacity: 0.8;
@@ -634,20 +634,20 @@ h1 {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
-  background: #f9fafb;
+  background: var(--surface-muted, #f9fafb);
   border-radius: 10px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border, #e5e7eb);
 }
 
 .frame-info-row span {
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--muted, #6b7280);
   font-weight: 500;
 }
 
 .frame-info-row strong {
   font-size: 0.95rem;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   font-weight: 700;
 }
 
@@ -663,15 +663,15 @@ h1 {
 }
 
 .ghost {
-  background: #ffffff;
-  border: 1px solid #dfe3ec;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
   padding: 0.65rem 1rem;
   border-radius: 12px;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   text-decoration: none;
-  color: #0f172a;
+  color: var(--text, #0f172a);
   font-size: 0.9rem;
   font-weight: 600;
   transition: all 0.2s ease;

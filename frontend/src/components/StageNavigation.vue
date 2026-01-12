@@ -210,39 +210,24 @@ function navigateToStage(stageId: string): void {
 }
 
 .stage-item.locked .stage-circle {
-  background: #f3f4f6;
-  border-color: #e5e7eb;
-  color: #9ca3af;
-}
-
-.stage-number {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.stage-icon {
-  color: currentColor;
-}
-
-.stage-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #0f172a;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.stage-item.active .stage-label {
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.stage-item.completed .stage-label {
-  color: #059669;
-  font-weight: 700;
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--muted);
 }
 
 .stage-item.locked .stage-label {
-  color: #9ca3af;
+  color: var(--muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  .stage-item.locked .stage-circle {
+    background: #0a0e16;
+    border-color: #1a202c;
+    color: #6b7684;
+  }
+  
+  .stage-item.locked .stage-label {
+    color: #6b7684;
+  }
 }
 </style>
