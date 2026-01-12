@@ -10,7 +10,7 @@ from dacite import from_dict as from_dict_dacite
 T = TypeVar("T")
 
 
-def from_dict(cls: type[T], data: dict) -> T:
+def from_dict[T](cls: type[T], data: dict) -> T:
     """Convert dictionary to dataclass instance with validation.
 
     Args:

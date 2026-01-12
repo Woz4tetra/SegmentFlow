@@ -56,7 +56,14 @@
         @click="goToStage(project)"
         @keydown.enter="goToStage(project)"
       >
-        <div class="thumb" :style="gradientStyle(project)">
+        <div class="thumb" :style="project.video_path ? {} : gradientStyle(project)">
+          <img
+            v-if="project.video_path"
+            :src="getThumbnailUrl(project.id)"
+            alt=""
+            class="thumb__img"
+            @error="onThumbnailError"
+          />
           <div class="thumb__top">
             <span
               class="stage"
@@ -151,6 +158,18 @@ const gradientStyle = (project: Project) => {
   const idx = Math.abs(hashSeed(seed)) % palette.length;
   const [from, to] = palette[idx];
   return { background: `linear-gradient(135deg, ${from}, ${to})` };
+};
+
+const baseApi = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1';
+
+const getThumbnailUrl = (projectId: string): string => {
+  return `${baseApi}/projects/${projectId}/thumbnail`;
+};
+
+const onThumbnailError = (e: Event) => {
+  // Hide broken image, gradient fallback will show
+  const img = e.target as HTMLImageElement;
+  img.style.display = 'none';
 };
 
 const labelForStage = (stage: ProjectStage): string => stageMeta[stage]?.label ?? 'Unknown stage';
@@ -353,12 +372,42 @@ h1 {
   flex-direction: column;
   gap: 0.5rem;
   justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #6366f1, #2563eb);
+}
+
+.thumb__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* Gradient overlay for text readability over thumbnails */
+.thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.1) 40%, rgba(0,0,0,0.4) 100%);
+  z-index: 0;
+  pointer-events: none;
 }
 
 .thumb__top {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.thumb__name {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .stage {

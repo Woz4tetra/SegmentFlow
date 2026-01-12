@@ -116,7 +116,48 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             # Create all tables
             await conn.run_sync(Base.metadata.create_all)
+
+            # Apply schema migrations for existing tables
+            await _apply_schema_migrations(conn)
+
         logger.info("Database initialization complete")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
+
+
+async def _apply_schema_migrations(conn) -> None:
+    """Apply schema migrations for existing columns.
+
+    This handles ALTER TABLE operations that create_all doesn't cover.
+    """
+    from sqlalchemy import text
+
+    db_url = settings.get_database_url()
+    if _is_sqlite(db_url):
+        # SQLite doesn't support ALTER COLUMN, but it's more flexible with types
+        return
+
+    # PostgreSQL migrations
+    migrations = [
+        # Migration: trim_start and trim_end from INTEGER to DOUBLE PRECISION
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'projects' AND column_name = 'trim_start' AND data_type = 'integer'
+            ) THEN
+                ALTER TABLE projects ALTER COLUMN trim_start TYPE DOUBLE PRECISION;
+                ALTER TABLE projects ALTER COLUMN trim_end TYPE DOUBLE PRECISION;
+            END IF;
+        END $$;
+        """,
+    ]
+
+    for migration in migrations:
+        try:
+            await conn.execute(text(migration))
+            logger.debug("Applied schema migration")
+        except Exception as e:
+            logger.warning(f"Schema migration skipped or failed: {e}")

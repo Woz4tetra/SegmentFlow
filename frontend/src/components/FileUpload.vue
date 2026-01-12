@@ -61,7 +61,6 @@
               :style="{ width: `${uploadProgress}%` }"
             ></div>
           </div>
-          <p class="file-upload__progress-status">{{ progressStatus }}</p>
         </div>
       </template>
     </div>
@@ -69,7 +68,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 
 interface Props {
   accept?: string;
@@ -98,12 +97,6 @@ const emit = defineEmits<Emits>();
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isDragging = ref(false);
 const dragCounter = ref(0); // Track nested drag events
-
-const progressStatus = computed(() => {
-  if (props.uploadProgress < 25) return 'Initializing upload...';
-  if (props.uploadProgress < 100) return 'Uploading video...';
-  return 'Finalizing...';
-});
 
 const handleDragEnter = (e: DragEvent) => {
   if (props.disabled || props.isUploading) return;
@@ -347,13 +340,6 @@ const triggerFileInput = () => {
   100% {
     transform: translateX(100%);
   }
-}
-
-.file-upload__progress-status {
-  font-size: 0.9rem;
-  color: var(--muted, #4b5563);
-  margin: 0;
-  text-align: center;
 }
 </style>
 

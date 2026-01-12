@@ -1,6 +1,6 @@
 """Projects endpoint for CRUD operations."""
 
-import io
+import threading
 from pathlib import Path
 from uuid import UUID
 
@@ -20,8 +20,8 @@ from app.api.v1.schemas import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.video_frames import convert_video_to_jpegs, generate_thumbnail, get_video_info
 from app.core.video_upload import VideoUploadService
-from app.core.video_frames import read_frame_at_time, convert_range_to_jpegs, get_video_info
 from app.models.project import Project, ProjectStage
 
 logger = get_logger(__name__)
@@ -29,6 +29,91 @@ router = APIRouter()
 
 # Global video upload service instance
 _upload_service = VideoUploadService()
+
+# In-memory conversion progress tracker: {project_id: {"saved": int, "total": int, "error": bool}}
+_conversion_progress: dict[str, dict[str, int | bool]] = {}
+
+
+def convert_video_task(
+    project_id: UUID,
+    video_path: Path,
+    project_dir: Path,
+    output_width: int,
+    inference_width: int,
+) -> None:
+    project_id_str = str(project_id)
+    logger.info(f"[BG] Starting conversion for project {project_id}")
+    _conversion_progress[project_id_str] = {"saved": 0, "total": 0, "error": False}
+    output_dir = project_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    inference_dir = project_dir / "inference"
+    inference_dir.mkdir(parents=True, exist_ok=True)
+
+    def progress_cb(saved: int, total: int):
+        _conversion_progress[project_id_str]["saved"] = saved
+        _conversion_progress[project_id_str]["total"] = total
+        logger.debug(f"[BG] Conversion progress {project_id}: {saved}/{total}")
+
+    did_error = convert_video_to_jpegs(
+        video_path,
+        output_dir,
+        inference_dir,
+        output_width,
+        inference_width,
+        progress_callback=progress_cb,
+    )
+    _conversion_progress[project_id_str]["error"] = did_error
+    logger.info(
+        f"[BG] JPEG conversion {'failed' if did_error else 'succeeded'} for project {project_id}"
+    )
+    if did_error:
+        return
+
+    # Generate thumbnail from first available frame in output directory
+    thumbnail_path = project_dir / "thumbnail.jpg"
+    try:
+        # Find the first frame file (sorted by frame number)
+        frame_files = list(output_dir.glob("frame_*.jpg"))
+        if frame_files:
+            # Sort by extracting the numeric part from filename
+            frame_files.sort(key=lambda p: int(p.stem.split("_")[1]))
+            generate_thumbnail(frame_files[0], thumbnail_path, max_width=320, quality=75)
+            logger.info(f"[BG] Thumbnail generated for project {project_id}")
+        else:
+            logger.warning(f"[BG] No frames found to generate thumbnail for project {project_id}")
+    except Exception as thumb_err:
+        logger.error(
+            f"[BG] Failed to generate thumbnail for project {project_id}: {thumb_err}",
+            exc_info=thumb_err,
+        )
+        _conversion_progress[project_id_str]["error"] = True
+
+
+def _start_conversion_background(
+    project_id: UUID,
+    video_path: Path,
+    project_dir: Path,
+    output_width: int,
+    inference_width: int,
+) -> None:
+    """Start video-to-JPEG conversion in background thread.
+
+    Args:
+        project_id: Project UUID
+        video_path: Path to video file
+        project_dir: Project directory
+        output_width: width of the output image
+        inference_width: width of the inference image
+    """
+
+    # Start conversion in background thread
+    thread = threading.Thread(
+        target=convert_video_task,
+        args=(project_id, video_path, project_dir, output_width, inference_width),
+        daemon=True,
+    )
+    thread.start()
+    logger.info(f"Background conversion thread started for project {project_id}")
 
 
 @router.post(
@@ -393,6 +478,9 @@ async def complete_video_upload(
                 ext = ext_candidate
         output_path = videos_dir / f"original{ext}"
 
+        output_width = settings.OUTPUT_WIDTH
+        inference_width = settings.INFERENCE_WIDTH
+
         logger.info(f"Finalizing upload to {output_path}")
 
         # Finalize upload (combine chunks, verify hash, cleanup temp files)
@@ -411,12 +499,17 @@ async def complete_video_upload(
             f"Completed video upload for project {project_id}: "
             f"{file_size} bytes saved to {output_path}"
         )
+        # Start background conversion for full video JPEG extraction
+        logger.info(f"Starting background conversion for project {project_id}")
+        _start_conversion_background(
+            project_id, output_path, project_dir, output_width, inference_width
+        )
 
         return VideoUploadCompleteResponse(
             project_id=project_id,
             video_path=str(output_path),
             file_size=file_size,
-            message="Video upload completed successfully",
+            message="Video upload completed successfully. Image conversion in progress.",
         )
 
     except HTTPException:
@@ -524,16 +617,16 @@ async def get_project_video(
 @router.post("/projects/{project_id}/trim", response_model=ProjectResponse)
 async def set_trim_range(
     project_id: UUID,
-    trim_start: int,
-    trim_end: int,
+    trim_start: float,
+    trim_end: float,
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
     """Update the project's trim range with basic validation.
 
     Args:
         project_id: ID of the project
-        trim_start: Start position (units currently seconds or frames TBD)
-        trim_end: End position (must be greater than start)
+        trim_start: Start position in seconds
+        trim_end: End position in seconds (must be greater than start)
         db: Database session dependency
 
     Returns:
@@ -581,7 +674,7 @@ async def preview_frame(
     time_sec: float,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return a single JPEG frame at the given time for preview purposes."""
+    """Return a pre-generated JPEG frame from output directory for the given time."""
     try:
         result = await db.execute(select(Project).where(Project.id == project_id))
         db_project = result.scalar_one_or_none()
@@ -589,55 +682,51 @@ async def preview_frame(
             raise HTTPException(status_code=404, detail="Project not found")
         if not db_project.video_path:
             raise HTTPException(status_code=404, detail="No video for project")
-        jpeg = read_frame_at_time(Path(db_project.video_path), float(time_sec))
-        return StreamingResponse(io.BytesIO(jpeg), media_type="image/jpeg")
+
+        # Get video info to map time to frame index
+        info = get_video_info(Path(db_project.video_path))
+        fps = max(info.fps, 1.0)
+        frame_index = int(max(0.0, float(time_sec)) * fps)
+        frame_index = min(frame_index, max(info.frame_count - 1, 0))
+
+        # Load pre-generated JPEG from output folder
+        frame_path = (
+            Path(settings.PROJECTS_ROOT_DIR)
+            / str(project_id)
+            / "output"
+            / f"frame_{frame_index:06d}.jpg"
+        )
+        if not frame_path.exists():
+            raise HTTPException(status_code=404, detail="Frame not yet generated")
+        return FileResponse(str(frame_path), media_type="image/jpeg")
     except HTTPException:
         raise
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"OpenCV not available: {e}") from e
     except Exception as e:
-        logger.error(f"Failed to generate preview for {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate preview") from e
+        logger.error(f"Failed to get preview for {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get preview") from e
 
 
-@router.post("/projects/{project_id}/convert_images")
-async def convert_images(
+@router.get("/projects/{project_id}/thumbnail")
+async def get_thumbnail(
     project_id: UUID,
-    trim_start: float,
-    trim_end: float,
-    processes: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Convert frames within selected range to JPEG and save under project folder."""
-    try:
-        result = await db.execute(select(Project).where(Project.id == project_id))
-        db_project = result.scalar_one_or_none()
-        if not db_project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        if not db_project.video_path:
-            raise HTTPException(status_code=404, detail="No video for project")
+    """Return the pre-generated thumbnail for project cards.
 
-        projects_root = Path(settings.PROJECTS_ROOT_DIR)
-        out_dir = projects_root / str(project_id) / "output"
-        out_dir.mkdir(parents=True, exist_ok=True)
+    Returns a 320px wide JPEG thumbnail generated when video conversion completed.
+    Used for quick-loading project card previews.
+    """
+    # Check if thumbnail exists on disk
+    thumbnail_path = Path(settings.PROJECTS_ROOT_DIR) / str(project_id) / "thumbnail.jpg"
 
-        summary = convert_range_to_jpegs(
-            Path(db_project.video_path), float(trim_start), float(trim_end), out_dir, processes
-        )
-        return {
-            "project_id": str(project_id),
-            "output_dir": str(out_dir),
-            "total": summary["total"],
-            "saved": summary["saved"],
-            "message": "Conversion completed",
-        }
-    except HTTPException:
-        raise
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"OpenCV not available: {e}") from e
-    except Exception as e:
-        logger.error(f"Failed to convert images for {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to convert images") from e
+    if not thumbnail_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+
+    return FileResponse(
+        str(thumbnail_path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/projects/{project_id}/video_info")
@@ -660,6 +749,40 @@ async def video_info(
         "width": info.width,
         "height": info.height,
         "duration": duration,
+    }
+
+
+@router.get("/projects/{project_id}/conversion/progress")
+async def get_conversion_progress(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current conversion progress for a project.
+
+    Returns progress information for in-progress JPEG conversion.
+    Used by frontend to update progress bar during image conversion phase.
+
+    Args:
+        project_id: ID of the project
+        db: Database session dependency
+
+    Returns:
+        dict: {"saved": int, "total": int, "error": bool, "complete": bool} - frames converted so far
+    """
+    project_id_str = str(project_id)
+    progress = _conversion_progress.get(project_id_str, {"saved": 0, "total": 0, "error": False})
+    logger.info(f"Conversion progress: {progress}")
+
+    # Check if conversion is complete by looking for thumbnail file
+    # (thumbnail is generated at the end of conversion)
+    thumbnail_path = Path(settings.PROJECTS_ROOT_DIR) / project_id_str / "thumbnail.jpg"
+    complete = thumbnail_path.exists()
+
+    return {
+        "saved": progress["saved"],
+        "total": progress["total"],
+        "error": progress["error"],
+        "complete": complete,
     }
 
 
