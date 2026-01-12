@@ -8,15 +8,15 @@
     </div>
     <div class="links">
       <router-link to="/" class="nav-btn" title="Home (H)">
-        <img src="/home_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Home" class="icon" />
+        <img src="/home_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Home" class="nav-icon" />
         <span>Home</span>
       </router-link>
       <router-link to="/labels" class="nav-btn" title="Label Editor (L)">
-        <img src="/label_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Labels" class="icon" />
+        <img src="/label_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Labels" class="nav-icon" />
         <span>Labels</span>
       </router-link>
       <router-link to="/settings" class="nav-btn" title="Settings (S)">
-        <img src="/settings_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Settings" class="icon" />
+        <img src="/settings_256dp_000000_FILL0_wght400_GRAD0_opsz48.svg" alt="Settings" class="nav-icon" />
         <span>Settings</span>
       </router-link>
       <button class="theme" @click="toggleTheme" :title="`Toggle Theme (current: ${theme})`">
@@ -87,4 +87,12 @@ const { toggleTheme } = app;
   transform: scale(1.05);
 }
 .icon { width: 20px; height: 20px; display: inline-block; }
+.nav-icon { width: 20px; height: 20px; display: inline-block; }
+</style>
+
+<style>
+/* Unscoped style for dark theme icon inversion */
+.theme-dark .nav-icon {
+  filter: invert(1);
+}
 </style>

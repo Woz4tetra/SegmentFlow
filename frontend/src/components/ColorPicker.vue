@@ -127,9 +127,9 @@ function generateGridPalette(): string[] {
 
 <style scoped>
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: grid; place-items: center; z-index: 50; }
-.panel { width: 900px; max-width: 98vw; background: var(--surface, #fff); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.12); padding: 0.75rem; }
-.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
-.close { border: none; background: transparent; cursor: pointer; font-size: 1rem; }
+.panel { width: 900px; max-width: 98vw; background: var(--surface, #fff); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.12); padding: 0.75rem; color: var(--text, #0f172a); }
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; color: var(--text, #0f172a); }
+.close { border: none; background: transparent; cursor: pointer; font-size: 1rem; color: var(--text, #0f172a); }
 .content { display: grid; grid-template-columns: 360px 520px; gap: 1rem; align-items: start; }
 .picker-wrapper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; align-items: start; justify-items: center; }
 .picker { margin: 0.25rem 0 0.5rem; }
@@ -137,7 +137,29 @@ function generateGridPalette(): string[] {
 .text-input { width: 100%; font-family: var(--font); font-size: 0.95rem; line-height: 1.25rem; padding: 0.45rem 0.6rem; border: 1px solid var(--border,#dfe3ec); border-radius: 10px; background: var(--surface,#fff); color: var(--text,#0f172a); transition: box-shadow var(--transition-duration,.2s), border-color var(--transition-duration,.2s); }
 .text-input:focus { outline: none; box-shadow: 0 8px 24px rgba(0,0,0,.06); border-color: #c9cfe0; }
 .palette { display: grid; grid-template-columns: repeat(10, 1fr); grid-auto-rows: 24px; gap: 0.25rem; }
-.swatch { width: 100%; height: 100%; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; }
+.swatch { width: 100%; height: 100%; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.15s ease; }
+.swatch:hover { transform: scale(1.1); }
 .footer { display: flex; justify-content: flex-end; margin-top: 0.6rem; }
-.apply { border: 1px solid var(--border,#dfe3ec); background: var(--surface-muted,#eef2f7); border-radius: 8px; padding: 0.4rem 0.8rem; cursor: pointer; }
+.apply { border: 1px solid var(--border,#dfe3ec); background: var(--surface-muted,#eef2f7); border-radius: 8px; padding: 0.4rem 0.8rem; cursor: pointer; color: var(--text,#0f172a); transition: background var(--transition-duration,.2s); }
+.apply:hover { background: var(--border,#dfe3ec); }
+</style>
+
+<style>
+/* Global styles for iro.js color picker to support dark mode */
+.iro__wheel,
+.iro__box,
+.iro__slider {
+  filter: none;
+}
+
+.iro__slider {
+  background: var(--surface-muted, #eef2f7) !important;
+}
+
+/* Iro SVG elements inherit from body, force lighter text in dark mode */
+:root[data-theme="dark"] .iro__wheel text,
+:root[data-theme="dark"] .iro__box text,
+:root[data-theme="dark"] .iro__slider text {
+  fill: var(--text, #0f172a) !important;
+}
 </style>
