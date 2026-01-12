@@ -85,8 +85,12 @@ const { toggleTheme } = app;
 .theme:hover {
   transform: scale(1.05);
 }
-.icon { width: 20px; height: 20px; display: inline-block; }
-.nav-icon { width: 20px; height: 20px; display: inline-block; }
+.icon,
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+}
 </style>
 
 <style>
