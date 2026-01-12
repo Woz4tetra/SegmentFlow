@@ -104,7 +104,7 @@ class ProjectResponse(ProjectBase):
     locked_by: str | None = None
     created_at: datetime
     updated_at: datetime
-    
+
     # Stage visited tracking
     upload_visited: bool = False
     trim_visited: bool = False
