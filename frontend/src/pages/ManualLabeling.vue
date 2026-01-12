@@ -23,7 +23,8 @@
       <p>Loading project and images...</p>
     </div>
 
-    <div v-else class="labeling-container">
+    <div v-else class="content-wrapper">
+      <div class="labeling-container">
       <!-- Image Viewer -->
       <div class="viewer-section">
         <ImageViewer 
@@ -57,48 +58,72 @@
         <!-- Frame Navigation -->
         <div class="control-section">
           <h3>Frame Navigation</h3>
+          
+          <!-- Jump to frame input -->
           <div class="frame-nav">
             <input 
               type="number" 
               v-model.number="frameInput" 
               @keyup.enter="goToFrame"
-              placeholder="Frame #"
+              placeholder="Go to frame"
               class="frame-input"
             />
-            <button @click="goToFrame" class="btn-sm">Go</button>
+            <button @click="goToFrame" class="btn-go">Go</button>
           </div>
-          <div class="nav-buttons">
-            <button @click="previousFrame" class="btn-sm" title="Previous (←, A)">
-              ← Previous <span class="hotkey">← A</span>
+          
+          <!-- Primary navigation buttons -->
+          <div class="nav-buttons-primary">
+            <button @click="previousFrame" class="btn-nav btn-nav-prev" title="Previous frame (← or A)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 19l-7-7 7-7"/>
+              </svg>
+              Previous
+              <span class="hotkey">← A</span>
             </button>
-            <button @click="nextFrame" class="btn-sm" title="Next (→, D)">
-              Next → <span class="hotkey">→ D</span>
+            <button @click="nextFrame" class="btn-nav btn-nav-next" title="Next frame (→ or D)">
+              Next
+              <span class="hotkey">→ D</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 5l7 7-7 7"/>
+              </svg>
             </button>
           </div>
-          <div class="nav-buttons">
-            <button @click="previousLabeledFrame" class="btn-sm" title="Previous labeled (Q)">
+          
+          <!-- Secondary navigation buttons -->
+          <div class="nav-buttons-secondary">
+            <button @click="previousLabeledFrame" class="btn-sm" title="Previous labeled frame (Q)">
               ⤎ Prev Labeled <span class="hotkey">Q</span>
             </button>
-            <button @click="nextLabeledFrame" class="btn-sm" title="Next labeled (E)">
+            <button @click="nextLabeledFrame" class="btn-sm" title="Next labeled frame (E)">
               Next Labeled ⤏ <span class="hotkey">E</span>
             </button>
           </div>
-          <div class="nav-buttons">
-            <button @click="bigJump" class="btn-sm" title="Big jump forward (N)">
-              ⇥ Jump {{ bigJumpSize }} <span class="hotkey">N</span>
-            </button>
-          </div>
+          
+          <!-- Big jump button -->
+          <button @click="bigJump" class="btn-sm btn-jump" title="Jump forward (N)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+            Jump +{{ bigJumpSize }} <span class="hotkey">N</span>
+          </button>
         </div>
 
         <!-- Frame Info -->
         <div class="control-section">
           <h3>Current Frame</h3>
           <div class="frame-info">
-            <p><strong>Frame:</strong> {{ currentFrameNumber }} / {{ totalFrames }}</p>
-            <p><strong>Status:</strong> {{ frameStatus }}</p>
+            <div class="frame-info-row">
+              <span>Frame Number</span>
+              <strong>{{ currentFrameNumber }} / {{ totalFrames }}</strong>
+            </div>
+            <div class="frame-info-row">
+              <span>Status</span>
+              <strong class="status-badge">{{ frameStatus }}</strong>
+            </div>
           </div>
         </div>
       </div>
+    </div>
     </div>
   </div>
 </template>
@@ -165,7 +190,11 @@ async function fetchProject(): Promise<void> {
 
 async function markStageVisited(): Promise<void> {
   try {
-    await api.post(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
+    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
+    // Update local project data with response
+    if (data) {
+      project.value = data;
+    }
   } catch (error) {
     console.error('Failed to mark stage as visited:', error);
   }
@@ -242,8 +271,27 @@ function handleKeyDown(event: KeyboardEvent): void {
 
 onMounted(async () => {
   loading.value = true;
-  await fetchProject();
-  await markStageVisited();
+  
+  try {
+    // Mark all previous stages as visited to ensure they're in the visited state
+    const uploadRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=upload`);
+    if (uploadRes.data) {
+      project.value = uploadRes.data;
+    }
+    
+    const trimRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    if (trimRes.data) {
+      project.value = trimRes.data;
+    }
+    
+    // Mark this stage as visited
+    const manualRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
+    if (manualRes.data) {
+      project.value = manualRes.data;
+    }
+  } catch (error) {
+    console.error('Failed during stage initialization:', error);
+  }
   
   // TODO: Load frames and set totalFrames
   totalFrames.value = 100; // Placeholder
@@ -262,12 +310,32 @@ onUnmounted(() => {
 <style scoped>
 .manual-labeling-page {
   min-height: 100vh;
-  background: var(--color-bg);
+  background: #ffffff;
 }
 
 .hero {
-  padding: 2rem;
-  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #dfe3ec;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(99, 102, 241, 0.04)),
+    #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
+  margin: 1rem 1.25rem 0;
+  width: calc(100% - 2.5rem);
+  max-width: 1400px;
+  transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.content-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 1.25rem;
+  background: #ffffff;
 }
 
 .hero__text {
@@ -275,17 +343,26 @@ onUnmounted(() => {
 }
 
 .eyebrow {
-  font-size: 0.875rem;
-  color: var(--color-primary);
-  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.5rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #5b6474;
+  margin: 0 0 0.35rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .lede {
-  color: var(--color-text-secondary);
-  margin-top: 0.5rem;
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.6;
+  font-size: 0.95rem;
 }
 
 .loading-container {
@@ -293,15 +370,16 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   padding: 4rem;
+  color: #4b5563;
 }
 
 .labeling-container {
   display: grid;
-  grid-template-columns: 1fr 350px;
-  gap: 1rem;
-  padding: 1rem;
-  max-width: 1800px;
-  margin: 0 auto;
+  grid-template-columns: 1fr 320px;
+  gap: 1.5rem;
+  padding: 0;
+  width: 100%;
+  max-width: 1400px;
 }
 
 .viewer-section {
@@ -314,16 +392,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 600px;
-  background: var(--color-bg-secondary);
-  border: 2px dashed var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text-secondary);
+  height: 700px;
+  background: linear-gradient(135deg, #f8f9fa, #eef2f7);
+  border: 2px dashed #dfe3ec;
+  border-radius: 16px;
+  color: #6b7280;
+  font-size: 1rem;
+  font-weight: 500;
 }
 
 .viewer-controls {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   justify-content: center;
 }
 
@@ -331,32 +411,45 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  padding: 0.65rem 1.2rem;
+  background: #ffffff;
+  border: 1px solid #dfe3ec;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #0f172a;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .control-btn:hover {
-  background: var(--color-bg-tertiary);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.25);
+  transform: translateY(-2px);
 }
 
 .control-btn svg {
+  width: 18px;
+  height: 18px;
   color: currentColor;
   fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
 }
 
 .control-panel {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  padding: 1rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  padding: 1.25rem;
+  background: #ffffff;
+  border: 1px solid #dfe3ec;
+  border-radius: 16px;
   height: fit-content;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
 }
 
 .control-section {
@@ -366,14 +459,14 @@ onUnmounted(() => {
 }
 
 .control-section h3 {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0f172a;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   margin: 0;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .frame-nav {
@@ -383,87 +476,237 @@ onUnmounted(() => {
 
 .frame-input {
   flex: 1;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-size: 0.875rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid #dfe3ec;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .frame-input:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.frame-input::placeholder {
+  color: #9ca3af;
 }
 
 .nav-buttons {
   display: flex;
   gap: 0.5rem;
+  flex-direction: column;
+}
+
+.nav-buttons-primary {
+  display: flex;
+  gap: 0.6rem;
+  flex-direction: column;
+}
+
+.btn-nav {
+  padding: 0.85rem 1rem;
+  background: linear-gradient(135deg, #ffffff, #f3f4f6);
+  border: 1.5px solid #dfe3ec;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.btn-nav svg {
+  color: currentColor;
+  fill: none;
+}
+
+.btn-nav:hover {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.25);
+  transform: translateY(-2px);
+}
+
+.btn-nav .hotkey {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.btn-nav:hover .hotkey {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.nav-buttons-secondary {
+  display: flex;
+  gap: 0.5rem;
+  flex-direction: column;
+}
+
+.btn-go {
+  padding: 0.65rem 1.2rem;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+}
+
+.btn-go:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
 }
 
 .btn-sm {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  padding: 0.75rem 0.9rem;
+  background: linear-gradient(135deg, #f3f4f6, #ffffff);
+  border: 1px solid #dfe3ec;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 0.875rem;
-  transition: all 0.2s;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 
 .btn-sm:hover {
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
   color: white;
-  border-color: var(--color-primary);
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-sm.btn-jump {
+  gap: 0.6rem;
+}
+
+.btn-sm.btn-jump svg {
+  color: currentColor;
+  fill: none;
 }
 
 .hotkey {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  font-weight: 400;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  font-weight: 500;
+  margin-left: 0.2rem;
+  opacity: 0.8;
 }
 
-.btn-sm:hover .hotkey {
-  color: rgba(255, 255, 255, 0.7);
+.btn-sm:hover .hotkey,
+.btn-nav:hover .hotkey {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .frame-info {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
-.frame-info p {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--color-text);
+.frame-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+}
+
+.frame-info-row span {
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.frame-info-row strong {
+  font-size: 0.95rem;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.3rem 0.8rem;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(124, 58, 237, 0.05));
+  border-radius: 6px;
+  color: #2563eb !important;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: capitalize;
 }
 
 .ghost {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid #dfe3ec;
+  padding: 0.65rem 1rem;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   text-decoration: none;
-  color: var(--color-text);
-  font-size: 0.875rem;
-  transition: all 0.2s;
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .ghost:hover {
-  background: var(--color-bg-secondary);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.25);
+  transform: translateY(-2px);
 }
 
 .icon {
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
+  stroke-width: 2;
+}
+
+@media (max-width: 1200px) {
+  .labeling-container {
+    grid-template-columns: 1fr 280px;
+  }
+}
+
+@media (max-width: 768px) {
+  .labeling-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .control-panel {
+    order: -1;
+  }
 }
 </style>

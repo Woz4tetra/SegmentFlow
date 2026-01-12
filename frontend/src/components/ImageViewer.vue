@@ -1,6 +1,7 @@
 <template>
   <div class="image-viewer" ref="containerRef">
     <v-stage
+      v-if="imageElement"
       ref="stageRef"
       :config="stageConfig"
       @mousedown="handleMouseDown"
@@ -15,6 +16,17 @@
         />
       </v-layer>
     </v-stage>
+    
+    <!-- Placeholder when no image is loaded -->
+    <div v-else class="placeholder">
+      <div class="placeholder-content">
+        <svg class="placeholder-icon" viewBox="0 0 24 24" width="48" height="48">
+          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/>
+        </svg>
+        <p class="placeholder-text">No image loaded</p>
+        <p class="placeholder-subtext">Images will appear here when available</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -228,13 +240,51 @@ onMounted(() => {
 .image-viewer {
   position: relative;
   background: #1a1a1a;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid #dfe3ec;
+  border-radius: 16px;
   overflow: hidden;
-  cursor: default;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  height: 700px;
 }
 
 .image-viewer canvas {
   display: block;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f3f4f6, #eef2f7);
+  border: 2px dashed #dfe3ec;
+  border-radius: 16px;
+}
+
+.placeholder-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.placeholder-icon {
+  color: #d1d5db;
+  opacity: 0.6;
+}
+
+.placeholder-text {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.placeholder-subtext {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #9ca3af;
 }
 </style>

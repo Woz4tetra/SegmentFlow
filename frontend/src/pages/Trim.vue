@@ -155,9 +155,17 @@ async function startManualLabeling(): Promise<void> {
   if (!canStartLabeling.value) return;
   
   try {
-    // Mark trim stage as visited and update stage to manual_labeling
-    await api.post(`/projects/${projectId}/mark_stage_visited?stage=trim`);
-    await api.patch(`/projects/${projectId}`, { stage: 'manual_labeling' });
+    // Ensure trim stage is marked as visited first
+    const visitResponse = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    if (visitResponse.data) {
+      project.value = visitResponse.data;
+    }
+    
+    // Then update stage to manual_labeling
+    const patchResponse = await api.patch<Project>(`/projects/${projectId}`, { stage: 'manual_labeling' });
+    if (patchResponse.data) {
+      project.value = patchResponse.data;
+    }
     
     // Navigate to manual labeling page
     router.push({ name: 'ManualLabeling', params: { id: projectId } });
@@ -197,7 +205,11 @@ async function saveTrim() {
 
 async function markStageVisited(): Promise<void> {
   try {
-    await api.post(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    // Update local project data with response
+    if (data) {
+      project.value = data;
+    }
   } catch (error) {
     console.error('Failed to mark stage as visited:', error);
   }
@@ -242,8 +254,18 @@ function stopConversionPolling() {
 
 onMounted(async () => {
   try {
-    await fetchProject();
+    // Ensure both upload and trim are marked as visited
+    // (upload might not be visited if project was created with id='new')
+    const markUploadRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=upload`);
+    if (markUploadRes.data) {
+      project.value = markUploadRes.data;
+    }
+    
+    // Now mark trim as visited
     await markStageVisited();
+    
+    // Fetch fresh project data
+    await fetchProject();
     await fetchVideoInfo();
     
     // Check if conversion is still in progress
@@ -279,15 +301,16 @@ onUnmounted(() => {
   background: var(--surface, #ffffff);
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
-  margin-bottom: 1.25rem;
-  width: 100%;
+  margin: 1rem 1.25rem 1.25rem;
+  width: calc(100% - 2.5rem);
+  max-width: 1400px;
 }
 .hero__text { max-width: 720px; width: 100%; }
 .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; font-size: 0.8rem; color: var(--muted, #5b6474); margin: 0 0 0.35rem; }
 h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .lede { margin: 0 0 0.75rem; color: var(--muted, #4b5563); line-height: 1.6; }
 
-.content { width: 100%; display: flex; flex-direction: column; gap: 1rem; }
+.content { width: calc(100% - 2.5rem); max-width: 1400px; margin: 0 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .trim-card { width: 100%; border: 1px solid var(--border, #dfe3ec); border-radius: 16px; padding: 1.5rem; background: var(--surface, #ffffff); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
 .preview-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
 .preview { background: var(--surface-elevated, var(--surface, #ffffff)); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }

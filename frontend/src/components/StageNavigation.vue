@@ -126,19 +126,22 @@ function navigateToStage(stageId: string): void {
 
 <style scoped>
 .stage-navigation {
-  padding: 1.5rem 2rem;
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 2rem;
+  width: 100%;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.04), rgba(99, 102, 241, 0.02));
+  border-bottom: 1px solid #dfe3ec;
+  margin-bottom: 0;
+  padding: 0.875rem 1.25rem;
 }
 
 .stage-track {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  max-width: 800px;
+  width: 100%;
+  max-width: 1400px;
   margin: 0 auto;
   position: relative;
+  padding: 0 1.5rem;
 }
 
 .stage-item {
@@ -154,12 +157,12 @@ function navigateToStage(stageId: string): void {
 
 .stage-item.locked {
   cursor: not-allowed;
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 .stage-item:not(.locked):hover .stage-circle {
   transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
 .stage-connector {
@@ -168,51 +171,53 @@ function navigateToStage(stageId: string): void {
   right: 50%;
   width: 100%;
   height: 2px;
-  background: var(--color-border);
+  background: #dfe3ec;
   z-index: 0;
 }
 
 .stage-item.completed .stage-connector,
 .stage-item.active .stage-connector {
-  background: var(--color-primary);
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
 }
 
 .stage-circle {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: var(--color-bg);
-  border: 2px solid var(--color-border);
+  background: #ffffff;
+  border: 2px solid #dfe3ec;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   z-index: 1;
   transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .stage-item.active .stage-circle {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-color: transparent;
   color: white;
-  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.4);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
 }
 
 .stage-item.completed .stage-circle {
-  background: var(--color-success);
-  border-color: var(--color-success);
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border-color: transparent;
   color: white;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
 }
 
 .stage-item.locked .stage-circle {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #9ca3af;
 }
 
 .stage-number {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
 }
 
 .stage-icon {
@@ -220,41 +225,24 @@ function navigateToStage(stageId: string): void {
 }
 
 .stage-label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--color-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #0f172a;
   text-align: center;
   white-space: nowrap;
 }
 
 .stage-item.active .stage-label {
-  color: var(--color-primary);
-  font-weight: 600;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.stage-item.completed .stage-label {
+  color: #059669;
+  font-weight: 700;
 }
 
 .stage-item.locked .stage-label {
-  color: var(--color-text-secondary);
-}
-
-/* Dark theme support */
-:root {
-  --color-bg: #ffffff;
-  --color-bg-secondary: #f8f9fa;
-  --color-bg-tertiary: #e9ecef;
-  --color-text: #212529;
-  --color-text-secondary: #6c757d;
-  --color-border: #dee2e6;
-  --color-primary: #0d6efd;
-  --color-primary-rgb: 13, 110, 253;
-  --color-success: #198754;
-}
-
-[data-theme="dark"] {
-  --color-bg: #1a1a1a;
-  --color-bg-secondary: #2d2d2d;
-  --color-bg-tertiary: #3a3a3a;
-  --color-text: #e9ecef;
-  --color-text-secondary: #adb5bd;
-  --color-border: #495057;
+  color: #9ca3af;
 }
 </style>

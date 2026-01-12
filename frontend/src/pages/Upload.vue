@@ -99,7 +99,11 @@ async function fetchProject(): Promise<void> {
 async function markStageVisited(): Promise<void> {
   if (!routeProjectId) return;
   try {
-    await api.post(`/projects/${routeProjectId}/mark_stage_visited?stage=upload`);
+    const { data } = await api.post<Project>(`/projects/${routeProjectId}/mark_stage_visited?stage=upload`);
+    // Update local project data with response
+    if (data) {
+      project.value = data;
+    }
   } catch (error) {
     console.error('Failed to mark stage as visited:', error);
   }
@@ -314,11 +318,14 @@ const handleFileSelect = async (file: File) => {
 
 // On entering Upload stage for an existing project, route to Trim if video exists
 onMounted(async () => {
-  if (!routeProjectId || routeProjectId === 'new') return;
+  // Mark upload stage as visited whenever this page is visited (new or existing project)
+  if (routeProjectId && routeProjectId !== 'new') {
+    await fetchProject();
+    await markStageVisited();
+  }
   
-  // Fetch project for stage navigation
-  await fetchProject();
-  await markStageVisited();
+  // Check if project already has a video and redirect if so
+  if (!routeProjectId || routeProjectId === 'new') return;
   
   try {
     const { data } = await api.get(`/projects/${routeProjectId}`);
@@ -343,8 +350,9 @@ onMounted(async () => {
   background: var(--surface, #ffffff);
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
-  margin-bottom: 1.25rem;
-  width: 100%;
+  margin: 1rem 1.25rem 1.25rem;
+  width: calc(100% - 2.5rem);
+  max-width: 1400px;
   transition: background var(--transition-duration, 0.2s) ease, box-shadow var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
 }
 
@@ -388,7 +396,9 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 }
 
 .content { 
-  width: 100%; 
+  width: calc(100% - 2.5rem); 
+  max-width: 1400px;
+  margin: 0 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
