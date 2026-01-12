@@ -469,7 +469,7 @@ async def complete_video_upload(
         project_dir = projects_root / str(project_id)
         videos_dir = project_dir / "videos"
         # Determine extension from original filename if available
-        session = _upload_service._sessions.get(str(project_id))  # scoped use
+        session = _upload_service.get_session(str(project_id))  # scoped use
         default_ext = ".mp4"
         ext = default_ext
         if session and session.original_name:

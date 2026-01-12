@@ -293,6 +293,9 @@ class VideoUploadService:
 
         del self._sessions[session_key]
 
+    def get_session(self, project_id: str) -> UploadSession | None:
+        return self._sessions.get(project_id)
+
     @staticmethod
     def _compute_file_hash(file_path: Path) -> str:
         """Compute SHA-256 hash of a file.
