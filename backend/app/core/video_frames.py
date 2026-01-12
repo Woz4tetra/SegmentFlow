@@ -43,9 +43,8 @@ def get_video_info(video_path: Path) -> VideoInfo:
     return info
 
 
-def _save_single_frame(frame: np.ndarray, out_path: str, output_width: int) -> None:
+def _save_single_frame(frame: np.ndarray, out_path: Path, output_width: int) -> None:
     """Save a single frame to JPEG."""
-    out_path = Path(out_path)
     original_height, original_width = frame.shape[0:2]
     resized_height = int(output_width * original_height / original_width)
     resized_frame = cv2.resize(
@@ -94,8 +93,8 @@ def convert_video_to_jpegs(
                 did_error_occur = True
                 break
             for width, base_dir in ((output_width, output_dir), (inference_width, inference_dir)):
-                image_out_path = str(base_dir / f"frame_{idx:06d}.jpg")
-                logger.debug(f'Saving to {image_out_path} with width {width}')
+                image_out_path = base_dir / f"frame_{idx:06d}.jpg"
+                logger.debug(f"Saving to {image_out_path} with width {width}")
                 _save_single_frame(frame, image_out_path, width)
                 saved += 1
                 if progress_callback:
@@ -106,7 +105,8 @@ def convert_video_to_jpegs(
     finally:
         cap.release()
 
-    progress_callback(saved, total)
+    if progress_callback:
+        progress_callback(saved, total)
 
     return did_error_occur
 

@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -126,7 +127,7 @@ async def init_db() -> None:
         raise
 
 
-async def _apply_schema_migrations(conn) -> None:
+async def _apply_schema_migrations(conn: AsyncConnection) -> None:
     """Apply schema migrations for existing columns.
 
     This handles ALTER TABLE operations that create_all doesn't cover.

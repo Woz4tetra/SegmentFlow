@@ -4,8 +4,8 @@ import threading
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +49,7 @@ def convert_video_task(
     inference_dir = project_dir / "inference"
     inference_dir.mkdir(parents=True, exist_ok=True)
 
-    def progress_cb(saved: int, total: int):
+    def progress_cb(saved: int, total: int) -> None:
         _conversion_progress[project_id_str]["saved"] = saved
         _conversion_progress[project_id_str]["total"] = total
         logger.debug(f"[BG] Conversion progress {project_id}: {saved}/{total}")
@@ -534,86 +534,6 @@ async def complete_video_upload(
         ) from e
 
 
-@router.get("/projects/{project_id}/video")
-async def get_project_video(
-    project_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Stream the uploaded video file for a project.
-
-    Returns the original uploaded video for preview/trim UI.
-
-    Args:
-        project_id: ID of the project
-        db: Database session dependency
-
-    Returns:
-        FileResponse: The video file response
-
-    Raises:
-        HTTPException: If project not found or video missing
-    """
-    # Fetch and validate project
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    db_project = result.scalar_one_or_none()
-    if not db_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if not db_project.video_path:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No video for project")
-
-    video_path = Path(db_project.video_path)
-    if not video_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file missing")
-
-    # Media type
-    ext = video_path.suffix.lower()
-    media_map = {".mp4": "video/mp4", ".mov": "video/quicktime", ".avi": "video/x-msvideo"}
-    media_type = media_map.get(ext, "application/octet-stream")
-
-    # Byte-range support
-    range_header = request.headers.get("range")
-    file_size = video_path.stat().st_size
-    if range_header:
-        try:
-            bytes_range = range_header.strip().lower().split("=")[1]
-            parts = bytes_range.split("-")
-            start = int(parts[0]) if parts[0] else 0
-            end = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
-            start = max(0, start)
-            end = min(end, file_size - 1)
-            chunk_size = (end - start) + 1
-
-            def iter_file(path: Path, offset: int, length: int):
-                with open(path, "rb") as f:
-                    f.seek(offset)
-                    remaining = length
-                    while remaining > 0:
-                        chunk = f.read(min(1024 * 1024, remaining))
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-
-            headers = {
-                "Content-Range": f"bytes {start}-{end}/{file_size}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(chunk_size),
-                "Content-Type": media_type,
-            }
-            return StreamingResponse(
-                iter_file(video_path, start, chunk_size),
-                status_code=206,
-                headers=headers,
-                media_type=media_type,
-            )
-        except Exception:
-            # Fallback to full file on parse errors
-            pass
-
-    return FileResponse(str(video_path), media_type=media_type)
-
-
 @router.post("/projects/{project_id}/trim", response_model=ProjectResponse)
 async def set_trim_range(
     project_id: UUID,
@@ -673,7 +593,7 @@ async def preview_frame(
     project_id: UUID,
     time_sec: float,
     db: AsyncSession = Depends(get_db),
-):
+) -> FileResponse:
     """Return a pre-generated JPEG frame from output directory for the given time."""
     try:
         result = await db.execute(select(Project).where(Project.id == project_id))
@@ -710,7 +630,7 @@ async def preview_frame(
 async def get_thumbnail(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
-):
+) -> FileResponse:
     """Return the pre-generated thumbnail for project cards.
 
     Returns a 320px wide JPEG thumbnail generated when video conversion completed.
@@ -733,7 +653,7 @@ async def get_thumbnail(
 async def video_info(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
-):
+) -> dict:
     """Return basic video metadata: fps, frame_count, width, height, duration."""
     result = await db.execute(select(Project).where(Project.id == project_id))
     db_project = result.scalar_one_or_none()
@@ -756,7 +676,7 @@ async def video_info(
 async def get_conversion_progress(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
-):
+) -> dict:
     """Get current conversion progress for a project.
 
     Returns progress information for in-progress JPEG conversion.
