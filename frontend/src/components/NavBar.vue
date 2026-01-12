@@ -2,7 +2,6 @@
   <nav class="navbar">
     <div class="brand">
       <router-link to="/" class="brand-link">
-        <img src="/icons/home.svg" alt="Home" class="icon" />
         <span class="brand-text">SegmentFlow</span>
       </router-link>
     </div>
