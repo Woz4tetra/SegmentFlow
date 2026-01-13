@@ -53,6 +53,14 @@ class Project(BaseModel):
     locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Stage visited tracking - tracks if a stage has been visited at least once
+    upload_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    trim_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    manual_labeling_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    propagation_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    validation_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    export_visited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # Relationships
     images: Mapped[list["Image"]] = relationship(
         "Image",

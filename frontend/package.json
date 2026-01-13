@@ -14,8 +14,10 @@
   "dependencies": {
     "@jaames/iro": "^5.5.2",
     "axios": "^1.13.2",
+    "konva": "^10.0.12",
     "pinia": "^2.1.7",
     "vue": "^3.4.15",
+    "vue-konva": "^3.3.0",
     "vue-router": "^4.2.5"
   },
   "devDependencies": {

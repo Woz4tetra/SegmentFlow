@@ -33,16 +33,16 @@ const themeClass = computed(() => (theme.value === 'dark' ? 'theme-dark' : 'them
   --transition-duration: 0.2s;
 }
 .container {
-  max-width: 3000px;
   width: 100%;
-  margin: 1.25rem auto;
-  padding: 0 1.25rem;
-  display: grid;
-  place-items: start center;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .container--nav {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
+  padding: 0;
 }
 .theme-light {
   --bg: #f5f7fb;

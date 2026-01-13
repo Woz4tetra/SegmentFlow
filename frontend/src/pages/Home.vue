@@ -181,7 +181,8 @@ const effectiveStage = (project: Project): ProjectStage => {
   return project.stage;
 };
 
-const isStageAvailable = (stage: ProjectStage): boolean => stage === 'upload' || stage === 'trim';
+const isStageAvailable = (stage: ProjectStage): boolean => 
+  stage === 'upload' || stage === 'trim' || stage === 'manual_labeling';
 
 const routeForProject = (project: Project) => {
   const eff = effectiveStage(project);
@@ -190,6 +191,9 @@ const routeForProject = (project: Project) => {
   }
   if (eff === 'trim' && project.id) {
     return { name: 'Trim', params: { id: project.id } };
+  }
+  if (eff === 'manual_labeling' && project.id) {
+    return { name: 'ManualLabeling', params: { id: project.id } };
   }
   return null;
 };

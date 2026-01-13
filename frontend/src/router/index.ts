@@ -5,6 +5,7 @@ const Settings = () => import('../pages/Settings.vue');
 const Upload = () => import('../pages/Upload.vue');
 const Trim = () => import('../pages/Trim.vue');
 const Labels = () => import('../pages/Labels.vue');
+const ManualLabeling = () => import('../pages/ManualLabeling.vue');
 
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'Home', component: Home },
@@ -12,6 +13,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/labels', name: 'Labels', component: Labels },
   { path: '/projects/:id/upload', name: 'Upload', component: Upload },
   { path: '/projects/:id/trim', name: 'Trim', component: Trim },
+  { path: '/projects/:id/manual-labeling', name: 'ManualLabeling', component: ManualLabeling },
 ];
 
 const router = createRouter({

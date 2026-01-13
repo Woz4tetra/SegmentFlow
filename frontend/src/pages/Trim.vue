@@ -1,4 +1,7 @@
 <template>
+  <!-- Stage Navigation -->
+  <StageNavigation v-if="project" :project="project" />
+
   <section class="hero">
     <router-link :to="{ name: 'Home' }" class="ghost btn-icon" title="Back to Projects">
       <svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -10,7 +13,7 @@
       <p class="eyebrow">Stage: Trim</p>
       <h1>Trim & Preview</h1>
       <p class="lede">
-        Select the start and end positions. The previews update to show the chosen start and end frames. Click "Save Trim" to proceed to labeling.
+        Select the start and end positions. The previews update to show the chosen start and end frames. Click "Start Manual Labeling" to proceed.
       </p>
     </div>
   </section>
@@ -62,7 +65,13 @@
           <p class="hint" v-if="validationError">{{ validationError }}</p>
 
           <div class="actions">
-            <button class="primary large" disabled>Start Manual Labeling</button>
+            <button 
+              class="primary large" 
+              @click="startManualLabeling"
+              :disabled="!canStartLabeling"
+            >
+              Start Manual Labeling
+            </button>
           </div>
         </div>
         <div v-else class="loading">Waiting for video metadata…</div>
@@ -76,6 +85,7 @@ import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import DualRangeSlider from '../components/DualRangeSlider.vue';
+import StageNavigation from '../components/StageNavigation.vue';
 
 interface Project {
   id: string;
@@ -87,6 +97,12 @@ interface Project {
   stage: string;
   created_at: string;
   updated_at: string;
+  upload_visited: boolean;
+  trim_visited: boolean;
+  manual_labeling_visited: boolean;
+  propagation_visited: boolean;
+  validation_visited: boolean;
+  export_visited: boolean;
 }
 
 const route = useRoute();
@@ -130,6 +146,34 @@ function validate(): string | '' {
 
 const validationError = computed(() => validate());
 
+const canStartLabeling = computed(() => {
+  // Can start labeling if conversion is complete (not in progress) and no validation errors
+  return !conversionInProgress.value && !validationError.value && conversionTotal.value > 0;
+});
+
+async function startManualLabeling(): Promise<void> {
+  if (!canStartLabeling.value) return;
+  
+  try {
+    // Ensure trim stage is marked as visited first
+    const visitResponse = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    if (visitResponse.data) {
+      project.value = visitResponse.data;
+    }
+    
+    // Then update stage to manual_labeling
+    const patchResponse = await api.patch<Project>(`/projects/${projectId}`, { stage: 'manual_labeling' });
+    if (patchResponse.data) {
+      project.value = patchResponse.data;
+    }
+    
+    // Navigate to manual labeling page
+    router.push({ name: 'ManualLabeling', params: { id: projectId } });
+  } catch (error) {
+    console.error('Failed to start manual labeling:', error);
+  }
+}
+
 async function fetchVideoInfo() {
   const { data } = await api.get<{ fps: number; frame_count: number; width: number; height: number; duration: number }>(`/projects/${projectId}/video_info`);
   duration.value = data?.duration ?? 0;
@@ -156,6 +200,18 @@ async function saveTrim() {
     });
   } catch (e) {
     console.error('Failed to save trim', e);
+  }
+}
+
+async function markStageVisited(): Promise<void> {
+  try {
+    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    // Update local project data with response
+    if (data) {
+      project.value = data;
+    }
+  } catch (error) {
+    console.error('Failed to mark stage as visited:', error);
   }
 }
 
@@ -198,6 +254,17 @@ function stopConversionPolling() {
 
 onMounted(async () => {
   try {
+    // Ensure both upload and trim are marked as visited
+    // (upload might not be visited if project was created with id='new')
+    const markUploadRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=upload`);
+    if (markUploadRes.data) {
+      project.value = markUploadRes.data;
+    }
+    
+    // Now mark trim as visited
+    await markStageVisited();
+    
+    // Fetch fresh project data
     await fetchProject();
     await fetchVideoInfo();
     
@@ -234,15 +301,16 @@ onUnmounted(() => {
   background: var(--surface, #ffffff);
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.06);
-  margin-bottom: 1.25rem;
-  width: 100%;
+  margin: 1rem 1.25rem 1.25rem;
+  width: calc(100% - 2.5rem);
+  max-width: 1400px;
 }
 .hero__text { max-width: 720px; width: 100%; }
 .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; font-size: 0.8rem; color: var(--muted, #5b6474); margin: 0 0 0.35rem; }
 h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .lede { margin: 0 0 0.75rem; color: var(--muted, #4b5563); line-height: 1.6; }
 
-.content { width: 100%; display: flex; flex-direction: column; gap: 1rem; }
+.content { width: calc(100% - 2.5rem); max-width: 1400px; margin: 0 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .trim-card { width: 100%; border: 1px solid var(--border, #dfe3ec); border-radius: 16px; padding: 1.5rem; background: var(--surface, #ffffff); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
 .preview-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
 .preview { background: var(--surface-elevated, var(--surface, #ffffff)); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
