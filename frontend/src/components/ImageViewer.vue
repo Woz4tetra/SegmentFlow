@@ -1,21 +1,12 @@
 <template>
   <div class="image-viewer" ref="containerRef">
-    <v-stage
-      v-if="imageElement"
-      ref="stageRef"
-      :config="stageConfig"
-      @mousedown="handleMouseDown"
-      @mousemove="handleMouseMove"
-      @mouseup="handleMouseUp"
-      @wheel="handleWheel"
-      @contextmenu.prevent
-    >
-      <v-layer>
-        <v-image
-          :config="imageConfig"
-        />
-      </v-layer>
-    </v-stage>
+    <canvas 
+      v-if="imageLoaded"
+      ref="canvasRef"
+      :width="width"
+      :height="height"
+      class="fabric-canvas"
+    />
     
     <!-- Placeholder when no image is loaded -->
     <div v-else class="placeholder">
@@ -35,8 +26,8 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
-import Konva from 'konva';
+import { ref, onMounted, watch, onBeforeUnmount, nextTick } from 'vue';
+import { fabric } from 'fabric';
 
 interface Props {
   imageUrl: string;
@@ -50,8 +41,9 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const containerRef = ref<HTMLElement | null>(null);
-const stageRef = ref<any>(null);
-const imageElement = ref<HTMLImageElement | null>(null);
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+let fabricCanvas: fabric.Canvas | null = null;
+
 const imageLoaded = ref(false);
 
 // Pan and zoom state
@@ -64,36 +56,30 @@ const lastPointerPosition = ref({ x: 0, y: 0 });
 const imageWidth = ref(0);
 const imageHeight = ref(0);
 
-const stageConfig = computed(() => ({
-  width: props.width,
-  height: props.height,
-  draggable: false,
-  scaleX: scale.value,
-  scaleY: scale.value,
-  x: position.value.x,
-  y: position.value.y,
-}));
-
-const imageConfig = computed(() => ({
-  image: imageElement.value,
-  x: 0,
-  y: 0,
-  width: imageWidth.value,
-  height: imageHeight.value,
-}));
-
 function loadImage(url: string): void {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   
   img.onload = () => {
-    imageElement.value = img;
     imageWidth.value = img.width;
     imageHeight.value = img.height;
     imageLoaded.value = true;
     
-    // Center the image initially
-    resetView();
+    // Initialize canvas on next tick to ensure DOM is ready
+    nextTick(() => {
+      if (canvasRef.value) {
+        // Dispose old canvas if it exists
+        if (fabricCanvas) {
+          try {
+            fabricCanvas.dispose();
+          } catch (e) {
+            console.warn('Error disposing canvas:', e);
+          }
+          fabricCanvas = null;
+        }
+        initializeFabricCanvas(img);
+      }
+    });
   };
   
   img.onerror = (error) => {
@@ -103,8 +89,41 @@ function loadImage(url: string): void {
   img.src = url;
 }
 
+function initializeFabricCanvas(img: HTMLImageElement): void {
+  if (!canvasRef.value) return;
+  
+  // Dispose old canvas if it exists
+  if (fabricCanvas) {
+    fabricCanvas.dispose();
+  }
+  
+  // Create fabric canvas
+  fabricCanvas = new fabric.Canvas(canvasRef.value, {
+    width: props.width,
+    height: props.height,
+    backgroundColor: '#1a1a1a',
+  });
+  
+  // Create fabric image from HTMLImageElement
+  const fabricImg = new fabric.Image(img, {
+    left: 0,
+    top: 0,
+  });
+  
+  fabricCanvas.add(fabricImg);
+  fabricCanvas.renderAll();
+  
+  // Center the image initially
+  resetView();
+  
+  // Set up event handlers
+  setupEventHandlers();
+}
+
 function resetView(): void {
-  if (!imageElement.value) return;
+  if (!fabricCanvas || !fabricCanvas.getObjects()[0]) return;
+  
+  const fabricImg = fabricCanvas.getObjects()[0];
   
   // Calculate scale to fit image in viewport
   const scaleX = props.width / imageWidth.value;
@@ -113,24 +132,38 @@ function resetView(): void {
   
   scale.value = fitScale;
   
+  // Set zoom level on canvas
+  fabricCanvas.setZoom(fitScale);
+  
   // Center the image
   const scaledWidth = imageWidth.value * fitScale;
   const scaledHeight = imageHeight.value * fitScale;
-  position.value = {
-    x: (props.width - scaledWidth) / 2,
-    y: (props.height - scaledHeight) / 2,
-  };
+  const panX = (props.width - scaledWidth) / 2 / fitScale;
+  const panY = (props.height - scaledHeight) / 2 / fitScale;
+  
+  fabricCanvas.viewportTransform = [fitScale, 0, 0, fitScale, panX, panY];
+  fabricCanvas.renderAll();
 }
 
-function handleMouseDown(e: any): void {
-  const evt = e.evt as MouseEvent;
+function setupEventHandlers(): void {
+  if (!fabricCanvas) return;
   
+  const canvas = fabricCanvas.lowerCanvasEl as HTMLCanvasElement;
+  
+  canvas.addEventListener('mousedown', handleMouseDown);
+  canvas.addEventListener('mousemove', handleMouseMove);
+  canvas.addEventListener('mouseup', handleMouseUp);
+  canvas.addEventListener('wheel', handleWheel, { passive: false });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function handleMouseDown(e: MouseEvent): void {
   // Only handle right mouse button for panning
-  if (evt.button === 2) {
+  if (e.button === 2) {
     isDragging.value = true;
     lastPointerPosition.value = {
-      x: evt.clientX,
-      y: evt.clientY,
+      x: e.clientX,
+      y: e.clientY,
     };
     
     // Change cursor
@@ -140,28 +173,28 @@ function handleMouseDown(e: any): void {
   }
 }
 
-function handleMouseMove(e: any): void {
-  if (!isDragging.value) return;
+function handleMouseMove(e: MouseEvent): void {
+  if (!isDragging.value || !fabricCanvas) return;
   
-  const evt = e.evt as MouseEvent;
-  const dx = evt.clientX - lastPointerPosition.value.x;
-  const dy = evt.clientY - lastPointerPosition.value.y;
+  const dx = e.clientX - lastPointerPosition.value.x;
+  const dy = e.clientY - lastPointerPosition.value.y;
   
-  position.value = {
-    x: position.value.x + dx,
-    y: position.value.y + dy,
-  };
+  const vt = fabricCanvas.viewportTransform;
+  if (vt) {
+    vt[4] += dx;
+    vt[5] += dy;
+    fabricCanvas.setViewportTransform(vt);
+    fabricCanvas.renderAll();
+  }
   
   lastPointerPosition.value = {
-    x: evt.clientX,
-    y: evt.clientY,
+    x: e.clientX,
+    y: e.clientY,
   };
 }
 
-function handleMouseUp(e: any): void {
-  const evt = e.evt as MouseEvent;
-  
-  if (evt.button === 2) {
+function handleMouseUp(e: MouseEvent): void {
+  if (e.button === 2) {
     isDragging.value = false;
     
     // Reset cursor
@@ -171,21 +204,21 @@ function handleMouseUp(e: any): void {
   }
 }
 
-function handleWheel(e: any): void {
-  e.evt.preventDefault();
+function handleWheel(e: WheelEvent): void {
+  if (!fabricCanvas) return;
   
-  const evt = e.evt as WheelEvent;
-  const stage = stageRef.value?.getStage();
-  if (!stage) return;
+  e.preventDefault();
   
   const oldScale = scale.value;
-  const pointer = stage.getPointerPosition();
-  
-  if (!pointer) return;
+  const rect = (fabricCanvas.lowerCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+  const pointer = {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+  };
   
   // Zoom factor
   const scaleBy = 1.05;
-  const direction = evt.deltaY > 0 ? -1 : 1;
+  const direction = e.deltaY > 0 ? -1 : 1;
   
   // Calculate new scale
   let newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
@@ -193,25 +226,29 @@ function handleWheel(e: any): void {
   // Limit zoom range
   newScale = Math.max(0.1, Math.min(newScale, 10));
   
-  // Calculate new position to zoom towards pointer
-  const mousePointTo = {
-    x: (pointer.x - position.value.x) / oldScale,
-    y: (pointer.y - position.value.y) / oldScale,
-  };
+  // Get current viewport transform
+  const vt = fabricCanvas.viewportTransform;
+  if (!vt) return;
   
-  const newPos = {
-    x: pointer.x - mousePointTo.x * newScale,
-    y: pointer.y - mousePointTo.y * newScale,
-  };
+  // Calculate zoom center point in canvas coordinates
+  const x = (pointer.x - vt[4]) / oldScale;
+  const y = (pointer.y - vt[5]) / oldScale;
+  
+  // Apply new zoom
+  vt[0] = newScale;
+  vt[3] = newScale;
+  vt[4] = pointer.x - x * newScale;
+  vt[5] = pointer.y - y * newScale;
+  
+  fabricCanvas.setViewportTransform(vt);
+  fabricCanvas.renderAll();
   
   scale.value = newScale;
-  position.value = newPos;
 }
 
 // Watch for image URL changes
 watch(() => props.imageUrl, (newUrl) => {
   if (newUrl) {
-    imageLoaded.value = false;
     loadImage(newUrl);
   }
 }, { immediate: true });
@@ -238,6 +275,17 @@ onMounted(() => {
     window.removeEventListener('keydown', handleKeyPress);
   };
 });
+
+onBeforeUnmount(() => {
+  if (fabricCanvas) {
+    try {
+      fabricCanvas.dispose();
+    } catch (e) {
+      console.warn('Error disposing canvas on unmount:', e);
+    }
+    fabricCanvas = null;
+  }
+});
 </script>
 
 <style scoped>
@@ -253,6 +301,8 @@ onMounted(() => {
 
 .image-viewer canvas {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .placeholder {
