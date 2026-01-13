@@ -248,3 +248,42 @@ class VideoUploadCompleteResponse(BaseModel):
     video_path: str = Field(..., description="Path where video was saved")
     file_size: int = Field(..., ge=0, description="Size of uploaded file")
     message: str = Field(..., description="Confirmation message")
+
+
+# ===== Image Schemas =====
+
+
+class ImageResponse(BaseModel):
+    """Schema for image/frame response.
+
+    Attributes:
+        id: Image UUID
+        frame_number: Frame number in video sequence
+        inference_path: Relative path to inference resolution image
+        output_path: Relative path to output resolution image
+        status: Processing status (pending, processed, failed)
+        manually_labeled: Whether image has manual labels
+        validation: Validation status (not_validated, passed, failed)
+    """
+
+    id: UUID
+    frame_number: int = Field(..., ge=0, description="Frame number in video")
+    inference_path: str | None = Field(None, description="Path to inference image")
+    output_path: str | None = Field(None, description="Path to output image")
+    status: str = Field(..., description="Processing status")
+    manually_labeled: bool = Field(False, description="Whether manually labeled")
+    validation: str = Field(..., description="Validation status")
+
+    model_config = {"from_attributes": True}
+
+
+class ImageListResponse(BaseModel):
+    """Schema for listing images.
+
+    Attributes:
+        images: List of image responses
+        total: Total number of images
+    """
+
+    images: list[ImageResponse] = Field(..., description="List of images")
+    total: int = Field(..., ge=0, description="Total number of images")
