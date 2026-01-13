@@ -58,6 +58,8 @@ const stages: Stage[] = [
   { id: 'trim', name: 'Trim', route: 'Trim' },
   { id: 'manual_labeling', name: 'Manual Label', route: 'ManualLabeling' },
   { id: 'propagation', name: 'Propagate', route: 'Propagation' },
+  { id: 'validation', name: 'Validation', route: 'Upload' },
+  { id: 'export', name: 'Export', route: 'Upload' },
 ];
 
 const currentStage = computed(() => props.project.stage);
@@ -157,7 +159,14 @@ function navigateToStage(stageId: string): void {
 
 .stage-item.locked {
   cursor: not-allowed;
-  opacity: 0.5;
+}
+
+.stage-item.locked .stage-circle {
+  opacity: 1.0;
+}
+
+.stage-item.locked .stage-label {
+  opacity: 1.0;
 }
 
 .stage-item:not(.locked):hover .stage-circle {
@@ -193,6 +202,7 @@ function navigateToStage(stageId: string): void {
   z-index: 1;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  color: #374151;
 }
 
 .stage-item.active .stage-circle {
@@ -210,24 +220,24 @@ function navigateToStage(stageId: string): void {
 }
 
 .stage-item.locked .stage-circle {
-  background: var(--surface-muted);
-  border-color: var(--border);
-  color: var(--muted);
+  background: #9ca3af;
+  border-color: #9ca3af;
+  color: white;
 }
 
 .stage-item.locked .stage-label {
-  color: var(--muted);
+  color: #6b7280;
 }
 
 @media (prefers-color-scheme: dark) {
   .stage-item.locked .stage-circle {
-    background: #0a0e16;
-    border-color: #1a202c;
-    color: #6b7684;
+    background: #9ca3af;
+    border-color: #9ca3af;
+    color: white;
   }
   
   .stage-item.locked .stage-label {
-    color: #6b7684;
+    color: #6b7280;
   }
 }
 </style>
