@@ -20,9 +20,13 @@
     <!-- Placeholder when no image is loaded -->
     <div v-else class="placeholder">
       <div class="placeholder-content">
-        <svg class="placeholder-icon" viewBox="0 0 24 24" width="48" height="48">
-          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/>
-        </svg>
+        <img 
+          class="placeholder-icon" 
+          src="/image_256dp_FFFFFF_FILL0_wght400_GRAD0_opsz48.svg" 
+          alt="No image" 
+          width="48" 
+          height="48"
+        />
         <p class="placeholder-text">No image loaded</p>
         <p class="placeholder-subtext">Images will appear here when available</p>
       </div>
@@ -273,6 +277,7 @@ onMounted(() => {
 .placeholder-icon {
   color: #d1d5db;
   opacity: 0.6;
+  filter: brightness(0) saturate(100%) invert(91%) sepia(6%) saturate(160%) hue-rotate(182deg) brightness(93%) contrast(87%);
 }
 
 .placeholder-text {
