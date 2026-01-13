@@ -162,20 +162,20 @@ const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
 const viewerWidth = ref(1200);
 const viewerHeight = ref(800);
-const bigJumpSize = ref(100); // TODO: Load from config
+const bigJumpSize = ref(100); // TODO[NAV-004]: Load from config
 
 const currentImage = computed(() => {
-  // TODO: Load actual image data
+  // TODO[CANVAS-003]: Load actual image data
   return currentFrameNumber.value <= totalFrames.value;
 });
 
 const currentImageUrl = computed(() => {
-  // TODO: Construct actual image URL
+  // TODO[CANVAS-003]: Construct actual image URL
   return `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1'}/projects/${projectId}/frames/${currentFrameNumber.value}`;
 });
 
 const frameStatus = computed(() => {
-  // TODO: Implement actual status tracking
+  // TODO[CANVAS-003]: Implement actual status tracking
   return 'Unlabeled';
 });
 
@@ -226,12 +226,12 @@ function previousFrame(): void {
 }
 
 function nextLabeledFrame(): void {
-  // TODO: Implement finding next labeled frame
+  // TODO[NAV-003]: Implement finding next labeled frame
   console.log('Next labeled frame');
 }
 
 function previousLabeledFrame(): void {
-  // TODO: Implement finding previous labeled frame
+  // TODO[NAV-003]: Implement finding previous labeled frame
   console.log('Previous labeled frame');
 }
 
@@ -293,7 +293,7 @@ onMounted(async () => {
     console.error('Failed during stage initialization:', error);
   }
   
-  // TODO: Load frames and set totalFrames
+  // TODO[CANVAS-003]: Load frames and set totalFrames
   totalFrames.value = 100; // Placeholder
   
   loading.value = false;
