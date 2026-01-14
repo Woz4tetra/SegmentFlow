@@ -5,9 +5,14 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-docker-compose down backend frontend
+PW_FILE="${PROJECT_ROOT}"/secrets/postgres_password.txt
+
+if [[ -f "${PW_FILE}" || -s "${PW_FILE}" ]]; then
+    ./scripts/create_db_password.sh
+fi
+
+docker-compose down backend frontend || true
 
 docker-compose up -d --build
 
-# Rotate the password after services are up so the new secret is applied and backend restarts.
-./scripts/rotate_db_password.sh
+./scripts/rotate_db_password.sh || true

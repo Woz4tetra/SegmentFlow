@@ -89,8 +89,7 @@ def convert_video_to_jpegs(
             logger.debug(f"Read frame {idx}")
             success, frame = cap.read()
             if not success:
-                logger.error(f"Failed to extract frame index {idx}")
-                did_error_occur = True
+                logger.error(f"Failed to extract frame index {idx}.")
                 break
             for width, base_dir in ((output_width, output_dir), (inference_width, inference_dir)):
                 image_out_path = base_dir / f"frame_{idx:06d}.jpg"

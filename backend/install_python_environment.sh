@@ -41,7 +41,7 @@ install_python_environment() {
     local VENV_DIR="$PROJECT_ROOT/venv"
 
     local REQUIRED_MAJOR=3
-    local REQUIRED_MINOR=11
+    local REQUIRED_MINOR=12
     
 
     # Find appropriate Python executable
