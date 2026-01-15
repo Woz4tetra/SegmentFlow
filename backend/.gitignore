@@ -51,7 +51,6 @@ ENV/
 
 # Data directories
 data/
-projects/
 
 # Logs
 *.log

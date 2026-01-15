@@ -1,7 +1,7 @@
 <template>
-  <div class="manual-labeling-page">
+  <div class="manual-labeling-page" :class="{ 'fullscreen': !sidebarVisible }">
     <!-- Stage Navigation -->
-    <StageNavigation v-if="project" :project="project" />
+    <StageNavigation v-if="project && sidebarVisible" :project="project" />
 
     <section class="hero">
       <router-link :to="{ name: 'Home' }" class="ghost btn-icon" title="Back to Projects">
@@ -24,7 +24,7 @@
     </div>
 
     <div v-else class="content-wrapper">
-      <div class="labeling-container">
+      <div class="labeling-container" :class="{ 'sidebar-hidden': !sidebarVisible }">
       <!-- Image Viewer -->
       <div class="viewer-section">
         <ImageViewer 
@@ -44,6 +44,19 @@
         <!-- Viewer Controls -->
         <div class="viewer-controls">
           <button 
+            @click="toggleSidebar" 
+            class="control-btn"
+            :title="sidebarVisible ? 'Hide sidebar (F)' : 'Show sidebar (F)'"
+          >
+            <svg v-if="sidebarVisible" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18l-6-6 6-6M21 18l-6-6 6-6" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 18l6-6-6-6M3 18l6-6-6-6" />
+            </svg>
+            {{ sidebarVisible ? 'Hide Sidebar' : 'Show Sidebar' }} <span class="hotkey">F</span>
+          </button>
+          <button 
             @click="resetView" 
             class="control-btn"
             title="Reset view (R)"
@@ -58,7 +71,7 @@
       </div>
 
       <!-- Control Panel -->
-      <div class="control-panel">
+      <div v-if="sidebarVisible" class="control-panel">
         <!-- Frame Navigation -->
         <div class="control-section">
           <h3>Frame Navigation</h3>
@@ -139,10 +152,23 @@
               v-for="label in labels" 
               :key="label.id"
               @click="selectLabel(label)"
+              @mouseenter="hoveredLabelId = label.id"
+              @mouseleave="hoveredLabelId = null"
               :class="['label-option', { active: selectedLabel?.id === label.id }]"
             >
               <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
               <span class="label-name">{{ label.name }}</span>
+              <!-- CANVAS-006: Thumbnail preview on hover -->
+              <div 
+                v-if="hoveredLabelId === label.id && label.thumbnail_path" 
+                class="label-thumbnail-preview"
+              >
+                <img 
+                  :src="label.thumbnail_path" 
+                  :alt="`${label.name} thumbnail`"
+                  @error="handleThumbnailError"
+                />
+              </div>
             </div>
           </div>
           <div v-if="selectedLabel" class="mode-info">
@@ -213,6 +239,8 @@ const frameInput = ref<number | null>(null);
 const viewerWidth = ref(1200);
 const viewerHeight = ref(800);
 const bigJumpSize = ref(100); // TODO[NAV-004]: Load from config
+const hoveredLabelId = ref<string | null>(null); // Track which label is being hovered
+const sidebarVisible = ref(true); // Sidebar visibility state
 
 const currentImage = computed(() => {
   if (images.value.length === 0) return null;
@@ -295,10 +323,22 @@ function selectLabel(label: Label): void {
   console.log('Selected label:', label.name);
 }
 
+function handleThumbnailError(event: Event): void {
+  // Hide broken thumbnail images
+  const img = event.target as HTMLImageElement;
+  if (img && img.parentElement) {
+    img.parentElement.style.display = 'none';
+  }
+}
+
 function resetView(): void {
   // This will be handled by the ImageViewer component
   // For now, just emit an event or use a ref
   console.log('Reset view requested');
+}
+
+function toggleSidebar(): void {
+  sidebarVisible.value = !sidebarVisible.value;
 }
 
 async function fetchImages(): Promise<void> {
@@ -392,6 +432,10 @@ function handleKeyDown(event: KeyboardEvent): void {
     case 'n':
       bigJump();
       break;
+    case 'f':
+    case 'F':
+      toggleSidebar();
+      break;
   }
 }
 
@@ -437,6 +481,23 @@ onUnmounted(() => {
 .manual-labeling-page {
   min-height: 100vh;
   background: var(--bg, #f5f7fb);
+  transition: all 0.3s ease;
+}
+
+.manual-labeling-page.fullscreen {
+  padding: 0;
+}
+
+.manual-labeling-page.fullscreen .content-wrapper {
+  padding: 0;
+  max-width: 100%;
+}
+
+.manual-labeling-page.fullscreen .hero {
+  margin: 0;
+  border-radius: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .hero {
@@ -462,6 +523,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 1.5rem 1.25rem;
   background: var(--bg, #f5f7fb);
+  transition: padding 0.3s ease;
 }
 
 .hero__text {
@@ -506,12 +568,21 @@ h1 {
   padding: 0;
   width: 100%;
   max-width: 1400px;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.labeling-container.sidebar-hidden {
+  grid-template-columns: 1fr;
+  max-width: 100%;
 }
 
 .viewer-section {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0; /* Allow flex item to shrink */
+  max-width: 100%; /* Prevent overflow */
+  overflow: hidden; /* Prevent content from overflowing */
 }
 
 .no-image {
@@ -576,6 +647,7 @@ h1 {
   border-radius: 16px;
   height: fit-content;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .control-section {
@@ -855,6 +927,84 @@ h1 {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text, #0f172a);
+}
+
+/* CANVAS-006: Label thumbnail preview on hover */
+.label-option {
+  position: relative;
+}
+
+.label-thumbnail-preview {
+  position: absolute;
+  left: calc(100% + 1rem);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  pointer-events: none;
+  animation: fadeIn 0.2s ease-in-out;
+  /* Prevent thumbnail from going off-screen */
+  max-width: 200px;
+  max-height: 200px;
+}
+
+.label-thumbnail-preview::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 8px 8px 8px 0;
+  border-color: transparent rgba(0, 0, 0, 0.15) transparent transparent;
+  filter: drop-shadow(-2px 0 2px rgba(0, 0, 0, 0.1));
+}
+
+.label-thumbnail-preview img {
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  border: 3px solid #ffffff;
+  background: var(--surface, #ffffff);
+  display: block;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+/* Adjust thumbnail position for last item to prevent overflow */
+.label-selector {
+  position: relative;
+  overflow: visible;
+}
+
+/* For the last label, show thumbnail above to prevent going off-screen */
+.label-option:last-child .label-thumbnail-preview {
+  top: auto;
+  bottom: 0;
+  transform: translateY(0);
+  left: calc(100% + 1rem);
+}
+
+.label-option:last-child .label-thumbnail-preview::before {
+  top: auto;
+  bottom: 1rem;
+  transform: translateY(0);
+  border-width: 0 8px 8px 8px;
+  border-color: transparent transparent rgba(0, 0, 0, 0.15) transparent;
+  left: -8px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
 }
 
 .mode-info {

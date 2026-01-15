@@ -388,6 +388,93 @@ class SAMMaskResponse(BaseModel):
         error: Error message if status is error
     """
 
+
+# ===== Labeled Points and Masks Schemas =====
+
+
+class LabeledPointCreate(BaseModel):
+    """Schema for creating a labeled point.
+
+    Attributes:
+        x: Normalized x coordinate [0, 1]
+        y: Normalized y coordinate [0, 1]
+        include: Whether this is an include (positive) or exclude (negative) point
+    """
+
+    x: float = Field(..., ge=0, le=1, description="Normalized x coordinate")
+    y: float = Field(..., ge=0, le=1, description="Normalized y coordinate")
+    include: bool = Field(True, description="Include (positive) or exclude (negative) point")
+
+
+class LabeledPointResponse(BaseModel):
+    """Schema for labeled point response.
+
+    Attributes:
+        id: Point UUID
+        x: Normalized x coordinate
+        y: Normalized y coordinate
+        include: Whether this is an include or exclude point
+    """
+
+    id: UUID
+    x: float
+    y: float
+    include: bool
+
+    model_config = {"from_attributes": True}
+
+
+class MaskCreate(BaseModel):
+    """Schema for creating a mask.
+
+    Attributes:
+        contour_polygon: Contour polygon as list of [x, y] coordinates
+        area: Area of the mask in pixels
+    """
+
+    contour_polygon: list[list[float]] = Field(..., description="Contour polygon [[x, y], ...]")
+    area: float = Field(..., ge=0, description="Mask area in pixels")
+
+
+class MaskResponse(BaseModel):
+    """Schema for mask response.
+
+    Attributes:
+        id: Mask UUID
+        contour_polygon: Contour polygon as list of [x, y] coordinates
+        area: Area of the mask in pixels
+    """
+
+    id: UUID
+    contour_polygon: list[list[float]]
+    area: float
+
+    model_config = {"from_attributes": True}
+
+
+class SaveLabeledPointsRequest(BaseModel):
+    """Schema for saving labeled points for an image.
+
+    Attributes:
+        label_id: UUID of the label
+        points: List of points to save
+    """
+
+    label_id: UUID = Field(..., description="Label UUID")
+    points: list[LabeledPointCreate] = Field(..., description="List of points to save")
+
+
+class SaveMaskRequest(BaseModel):
+    """Schema for saving a mask for an image.
+
+    Attributes:
+        label_id: UUID of the label
+        mask: Mask data to save
+    """
+
+    label_id: UUID = Field(..., description="Label UUID")
+    mask: MaskCreate = Field(..., description="Mask data to save")
+
     project_id: UUID = Field(..., description="Project UUID")
     frame_number: int = Field(..., ge=0, description="Frame number")
     label_id: UUID = Field(..., description="Label/object UUID")
