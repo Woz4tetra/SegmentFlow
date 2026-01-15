@@ -201,9 +201,8 @@ function setupEventHandlers(): void {
   });
   
   // Also attach to the canvas element itself
-  const canvas = fabricCanvas.lowerCanvasEl as HTMLCanvasElement;
-  if (canvas) {
-    canvas.addEventListener('mousedown', (e) => {
+  if (canvasRef.value) {
+    canvasRef.value.addEventListener('mousedown', (e) => {
       if (e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
@@ -296,7 +295,7 @@ function handleWheel(e: WheelEvent): void {
   e.preventDefault();
   
   const oldScale = scale.value;
-  const rect = (fabricCanvas.lowerCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+  const rect = containerRef.value!.getBoundingClientRect();
   const pointer = {
     x: e.clientX - rect.left,
     y: e.clientY - rect.top,

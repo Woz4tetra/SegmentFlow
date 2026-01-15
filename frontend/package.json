@@ -20,6 +20,7 @@
     "vue-router": "^4.2.5"
   },
   "devDependencies": {
+    "@types/fabric": "^5.3.11",
     "@vitejs/plugin-vue": "^5.0.3",
     "typescript": "^5.4.5",
     "vite": "^5.0.12",
