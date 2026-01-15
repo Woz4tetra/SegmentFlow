@@ -118,6 +118,8 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
 ]
+branch = true
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 exclude_lines = [
