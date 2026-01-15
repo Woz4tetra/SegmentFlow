@@ -226,7 +226,7 @@ const currentImage = computed(() => {
 });
 
 const currentImageUrl = computed(() => {
-  // TODO[CANVAS-003]: Construct actual image URL
+  // CANVAS-003: Construct image URL from backend endpoint
   return `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1'}/projects/${projectId}/frames/${currentFrameNumber.value}`;
 });
 

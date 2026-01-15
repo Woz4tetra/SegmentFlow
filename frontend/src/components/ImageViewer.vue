@@ -85,6 +85,7 @@ const imageHeight = ref(0);
 // Point clicking state (CANVAS-003)
 const includeMode = ref(true); // true = include (I key), false = exclude (U key)
 const points = ref<Point[]>([]); // Store clicked points
+const pointCircles = ref<Map<string, fabric.Circle>>(new Map()); // Store point circle objects for updates
 const currentMask = ref<MaskData | null>(null); // Current SAM mask
 let maskOverlay: fabric.Image | null = null; // Fabric image for mask overlay
 
@@ -195,6 +196,19 @@ function resetView(): void {
     top: centerY,
   });
   
+  // Update mask overlay position
+  if (maskOverlay) {
+    maskOverlay.set({
+      left: centerX,
+      top: centerY,
+      scaleX: fitScale,
+      scaleY: fitScale,
+    });
+  }
+  
+  // Update point positions
+  updatePointPositions();
+  
   fabricCanvas.renderAll();
 }
 
@@ -302,6 +316,17 @@ function handleMouseMove(e: MouseEvent): void {
     top: currentTop + dy,
   });
   
+  // Update mask overlay position
+  if (maskOverlay) {
+    maskOverlay.set({
+      left: currentLeft + dx,
+      top: currentTop + dy,
+    });
+  }
+  
+  // Update point positions
+  updatePointPositions();
+  
   fabricCanvas.renderAll();
   
   lastPointerPosition.value = {
@@ -378,6 +403,19 @@ function handleWheel(e: WheelEvent): void {
     top: newTop,
   });
   
+  // Update mask overlay position and scale
+  if (maskOverlay) {
+    maskOverlay.set({
+      left: newLeft,
+      top: newTop,
+      scaleX: newScale,
+      scaleY: newScale,
+    });
+  }
+  
+  // Update point positions
+  updatePointPositions();
+  
   fabricCanvas.renderAll();
   
   scale.value = newScale;
@@ -426,7 +464,7 @@ function handleLeftClick(e: MouseEvent): void {
   // Render point visual
   renderPoint(point, canvasX, canvasY);
 
-  // Send to SAM for inference
+  // Queue SAM inference request (SAM-003: async processing)
   requestSAMInference();
 }
 
@@ -456,6 +494,36 @@ function renderPoint(point: Point, canvasX: number, canvasY: number): void {
 
   fabricCanvas.add(circle);
   fabricCanvas.bringToFront(circle);
+  
+  // Store circle reference for updates
+  pointCircles.value.set(point.id, circle);
+  
+  fabricCanvas.renderAll();
+}
+
+function updatePointPositions(): void {
+  if (!fabricCanvas || !fabricImg) return;
+  
+  const imgLeft = fabricImg.left || 0;
+  const imgTop = fabricImg.top || 0;
+  const imgScaleX = fabricImg.scaleX || 1;
+  const radius = 6;
+  
+  // Update each point circle position based on current image transform
+  points.value.forEach((point) => {
+    const circle = pointCircles.value.get(point.id);
+    if (!circle) return;
+    
+    // Convert normalized coordinates to canvas coordinates
+    const canvasX = imgLeft + point.x * imageWidth.value * imgScaleX;
+    const canvasY = imgTop + point.y * imageHeight.value * imgScaleX;
+    
+    circle.set({
+      left: canvasX - radius,
+      top: canvasY - radius,
+    });
+  });
+  
   fabricCanvas.renderAll();
 }
 
@@ -470,7 +538,21 @@ async function requestSAMInference(): Promise<void> {
     return;
   }
 
+  // SAM-003: Queue request for async processing
   const requestId = `req-${Date.now()}-${Math.random()}`;
+
+  // Create promise for this request
+  const promise = new Promise<MaskData | null>((resolve, reject) => {
+    pendingRequests.set(requestId, { resolve, reject });
+    
+    // Set timeout to reject if no response after 10 seconds
+    setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        reject(new Error('SAM inference timeout'));
+      }
+    }, 10000);
+  });
 
   const request = {
     project_id: props.projectId,
@@ -485,8 +567,19 @@ async function requestSAMInference(): Promise<void> {
 
   try {
     websocket.send(JSON.stringify(request));
+    
+    // Wait for response (async update)
+    try {
+      const mask = await promise;
+      if (mask) {
+        console.log('Received mask for request:', requestId);
+      }
+    } catch (error) {
+      console.error('Error waiting for SAM response:', error);
+    }
   } catch (error) {
     console.error('Error sending SAM request:', error);
+    pendingRequests.delete(requestId);
   }
 }
 
@@ -573,6 +666,12 @@ function renderMask(): void {
   fabricCanvas.add(maskOverlay);
   // Ensure mask is above image but below points
   fabricCanvas.moveTo(maskOverlay, 1);
+  
+  // Bring all points to front after adding mask
+  pointCircles.value.forEach((circle) => {
+    fabricCanvas.bringToFront(circle);
+  });
+  
   fabricCanvas.renderAll();
 
   console.log('Rendered mask overlay');
@@ -595,6 +694,13 @@ watch(() => props.imageUrl, (newUrl) => {
     loadImage(newUrl);
     // Clear points when image changes
     points.value = [];
+    // Remove all point circles
+    pointCircles.value.forEach((circle) => {
+      if (fabricCanvas) {
+        fabricCanvas.remove(circle);
+      }
+    });
+    pointCircles.value.clear();
     currentMask.value = null;
     if (maskOverlay && fabricCanvas) {
       fabricCanvas.remove(maskOverlay);
@@ -609,6 +715,13 @@ defineExpose({
   getPoints: () => points.value,
   clearPoints: () => {
     points.value = [];
+    // Remove all point circles
+    pointCircles.value.forEach((circle) => {
+      if (fabricCanvas) {
+        fabricCanvas.remove(circle);
+      }
+    });
+    pointCircles.value.clear();
     currentMask.value = null;
     if (maskOverlay && fabricCanvas) {
       fabricCanvas.remove(maskOverlay);
@@ -644,25 +757,42 @@ function connectWebSocket(): void {
         return;
       }
 
-      // Handle mask responses
+      // Handle mask responses (SAM-003: async mask updates)
       if (data.status === 'success' && data.mask_rle) {
-        currentMask.value = {
+        const maskData: MaskData = {
           rle: data.mask_rle,
           bbox: data.mask_bbox || [0, 0, 0, 0],
         };
+        
+        // Update current mask (async update as processed)
+        currentMask.value = maskData;
         renderMask();
 
         // Resolve pending promise if exists
         if (data.request_id && pendingRequests.has(data.request_id)) {
           const { resolve } = pendingRequests.get(data.request_id)!;
-          resolve(currentMask.value);
+          resolve(maskData);
           pendingRequests.delete(data.request_id);
+          console.log(`Mask updated for request ${data.request_id}`);
         }
       } else if (data.status === 'error') {
-        console.error('SAM inference error:', data.error);
+        const errorMsg = data.error || 'Unknown error';
+        console.error('SAM inference error:', errorMsg);
+        
+        // Clear current mask on error
+        if (errorMsg.includes('not initialized') || errorMsg.includes('failed to load')) {
+          currentMask.value = null;
+          if (maskOverlay && fabricCanvas) {
+            fabricCanvas.remove(maskOverlay);
+            maskOverlay = null;
+            fabricCanvas.renderAll();
+          }
+        }
+        
+        // Reject pending promise if exists
         if (data.request_id && pendingRequests.has(data.request_id)) {
           const { reject } = pendingRequests.get(data.request_id)!;
-          reject(new Error(data.error || 'Unknown error'));
+          reject(new Error(errorMsg));
           pendingRequests.delete(data.request_id);
         }
       }
@@ -674,6 +804,14 @@ function connectWebSocket(): void {
   websocket.onerror = (error) => {
     console.error('SAM WebSocket error:', error);
     wsConnected.value = false;
+    // Show user-friendly error message
+    if (pendingRequests.size > 0) {
+      const errorMsg = 'WebSocket connection error. Please refresh the page.';
+      for (const [requestId, { reject }] of pendingRequests.entries()) {
+        reject(new Error(errorMsg));
+      }
+      pendingRequests.clear();
+    }
   };
 
   websocket.onclose = () => {

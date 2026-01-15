@@ -583,9 +583,19 @@ class SAM3Tracker:
 
         Returns:
             Mask at original resolution, or None
+
+        Raises:
+            RuntimeError: If model not loaded or images directory not set
         """
         if len(points) == 0:
             return None
+
+        # Ensure model is loaded
+        if self.model is None or self.predictor is None:
+            logger.warning("Model not loaded in get_preview_mask, loading now...")
+            self.load_model()
+            if self.model is None or self.predictor is None:
+                raise RuntimeError("Failed to load SAM3 model")
 
         if self.images_dir is None:
             raise RuntimeError("No images directory set. Call set_images_dir() first.")

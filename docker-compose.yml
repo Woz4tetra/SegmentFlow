@@ -55,12 +55,15 @@ services:
       ENVIRONMENT: development
       DEBUG: "True"
       CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "http://frontend:5173"]'
+      # Set Hugging Face home to use mounted cache
+      HF_HOME: /root/.cache/huggingface
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      # Cache SAM3 model checkpoints on host
-      - sam3_checkpoints:/root/.cache/sam3
+      # Cache SAM3 model from Hugging Face (mount local cache)
+      - ./backend/data/models:/root/.cache/huggingface/hub
+      # Cache PyTorch models
       - torch_cache:/root/.cache/torch
     networks:
       - segmentflow-network
@@ -92,7 +95,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  sam3_checkpoints:
   torch_cache:
 
 networks:

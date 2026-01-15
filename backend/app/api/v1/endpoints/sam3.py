@@ -176,6 +176,23 @@ async def _process_sam_request(
                 error="SAM3 model not initialized",
             )
 
+        # Ensure model is loaded before use
+        if tracker.model is None or tracker.predictor is None:
+            logger.warning("SAM3 model not loaded, attempting to load now...")
+            try:
+                tracker.load_model()
+            except Exception as e:
+                logger.error(f"Failed to load SAM3 model: {e}", exc_info=True)
+                return SAMMaskResponse(
+                    project_id=request.project_id,
+                    frame_number=request.frame_number,
+                    label_id=request.label_id,
+                    request_id=request.request_id,
+                    inference_time_ms=0,
+                    status="error",
+                    error=f"SAM3 model failed to load: {e}",
+                )
+
         # Verify project exists
         project_result = await db.execute(select(Project).where(Project.id == request.project_id))
         project = project_result.scalar_one_or_none()
@@ -333,7 +350,7 @@ async def sam3_inference_websocket(websocket: WebSocket) -> None:
                             queue_size=queue_size,
                             processing=_is_processing,
                             estimated_wait_ms=queue_size * 50.0,  # Estimate 50ms per request
-                        ).model_dump(mode='json')
+                        ).model_dump(mode="json")
                     )
 
                     # Process queue if not already processing
@@ -390,7 +407,7 @@ async def _process_queue() -> None:
 
                 # Send response with request_id to maintain ordering on client
                 # Use mode='json' to properly serialize UUID fields
-                await websocket.send_json(response.model_dump(mode='json'))
+                await websocket.send_json(response.model_dump(mode="json"))
 
                 # Log successful processing
                 logger.debug(
