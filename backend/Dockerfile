@@ -27,11 +27,9 @@ RUN python3.12 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install SAM3 from official Meta AI repository
-RUN git clone https://github.com/facebookresearch/sam3.git /tmp/sam3 && \
-    cd /tmp/sam3 && \
-    /opt/venv/bin/pip install --no-cache-dir -e . && \
-    # Clean up to reduce image size
-    rm -rf /tmp/sam3
+RUN git clone https://github.com/facebookresearch/sam3.git /opt/facebookresearch/sam3 && \
+    cd /opt/facebookresearch/sam3 && \
+    /opt/venv/bin/pip install --no-cache-dir -e .
 
 # Copy pyproject.toml and install project dependencies
 COPY pyproject.toml .

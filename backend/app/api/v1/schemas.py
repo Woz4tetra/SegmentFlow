@@ -287,3 +287,130 @@ class ImageListResponse(BaseModel):
 
     images: list[ImageResponse] = Field(..., description="List of images")
     total: int = Field(..., ge=0, description="Total number of images")
+
+
+# ===== SAM3 WebSocket Schemas =====
+
+
+class SAMPointRequest(BaseModel):
+    """Schema for SAM3 point-based mask inference request via WebSocket.
+
+    Attributes:
+        project_id: UUID of the project
+        frame_number: Frame number to perform inference on
+        label_id: UUID of the label/object class
+        points: List of points with normalized coordinates [x, y] in range [0, 1]
+        labels: List of point labels (1 for include/positive, 0 for exclude/negative)
+        request_id: Optional client-generated ID to correlate request/response
+    """
+
+    project_id: UUID = Field(..., description="Project UUID")
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    label_id: UUID = Field(..., description="Label/object UUID")
+    points: list[list[float]] = Field(
+        ...,
+        description="Points with normalized coords [[x, y], ...]",
+        min_length=1,
+    )
+    labels: list[int] = Field(
+        ...,
+        description="Point labels: 1=include, 0=exclude",
+        min_length=1,
+    )
+    request_id: str | None = Field(None, description="Optional client request ID")
+
+    @field_validator("points")
+    @classmethod
+    def validate_points(cls, v: list[list[float]]) -> list[list[float]]:
+        """Validate points are 2D with normalized coordinates.
+
+        Args:
+            v: Points to validate
+
+        Returns:
+            list[list[float]]: Validated points
+
+        Raises:
+            ValueError: If points are invalid
+        """
+        for point in v:
+            if len(point) != 2:
+                msg = f"Each point must have exactly 2 coordinates, got {len(point)}"
+                raise ValueError(msg)
+            x, y = point
+            if not (0 <= x <= 1 and 0 <= y <= 1):
+                msg = f"Point coordinates must be normalized [0, 1], got ({x}, {y})"
+                raise ValueError(msg)
+        return v
+
+    @field_validator("labels")
+    @classmethod
+    def validate_labels(cls, v: list[int], info) -> list[int]:
+        """Validate labels match points length and are 0 or 1.
+
+        Args:
+            v: Labels to validate
+            info: Field validation info
+
+        Returns:
+            list[int]: Validated labels
+
+        Raises:
+            ValueError: If labels are invalid
+        """
+        # Check if points field exists in the data
+        if hasattr(info, "data") and "points" in info.data:
+            points = info.data["points"]
+            if len(v) != len(points):
+                msg = f"Labels length ({len(v)}) must match points length ({len(points)})"
+                raise ValueError(msg)
+
+        # Validate each label is 0 or 1
+        for label in v:
+            if label not in {0, 1}:
+                msg = f"Each label must be 0 or 1, got {label}"
+                raise ValueError(msg)
+        return v
+
+
+class SAMMaskResponse(BaseModel):
+    """Schema for SAM3 mask inference response via WebSocket.
+
+    Attributes:
+        project_id: UUID of the project
+        frame_number: Frame number inference was performed on
+        label_id: UUID of the label/object class
+        mask_rle: Run-length encoded mask for efficient transmission
+        mask_bbox: Bounding box [x, y, width, height] in pixel coordinates
+        request_id: Client request ID if provided
+        inference_time_ms: Time taken for inference in milliseconds
+        status: Response status (success, error)
+        error: Error message if status is error
+    """
+
+    project_id: UUID = Field(..., description="Project UUID")
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    label_id: UUID = Field(..., description="Label/object UUID")
+    mask_rle: str | None = Field(None, description="Run-length encoded mask")
+    mask_bbox: list[int] | None = Field(
+        None,
+        description="Bounding box [x, y, width, height]",
+    )
+    request_id: str | None = Field(None, description="Client request ID")
+    inference_time_ms: float = Field(..., ge=0, description="Inference time in ms")
+    status: str = Field(..., description="Response status: success or error")
+    error: str | None = Field(None, description="Error message if failed")
+
+
+class SAMQueueStatusResponse(BaseModel):
+    """Schema for SAM3 queue status updates via WebSocket.
+
+    Attributes:
+        queue_size: Number of requests currently in queue
+        processing: Whether a request is currently being processed
+        estimated_wait_ms: Estimated wait time in milliseconds
+    """
+
+    queue_size: int = Field(..., ge=0, description="Requests in queue")
+    processing: bool = Field(..., description="Whether processing active")
+    estimated_wait_ms: float = Field(..., ge=0, description="Estimated wait time")
