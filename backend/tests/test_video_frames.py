@@ -305,8 +305,8 @@ class TestConvertVideoToJpegs:
                 inference_width=640,
             )
 
-            # Should return True (error occurred)
-            assert result is True
+            # Should return False but the capture ended early
+            assert result is False
             # Capture should be released
             mock_cap.release.assert_called_once()
 

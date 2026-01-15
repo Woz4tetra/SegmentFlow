@@ -6,10 +6,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.api.v1.schemas import (
+    ImageListResponse,
+    ImageResponse,
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
@@ -22,6 +25,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.video_frames import convert_video_to_jpegs, generate_thumbnail, get_video_info
 from app.core.video_upload import VideoUploadService
+from app.models.image import Image, ImageStatus, ValidationStatus
 from app.models.project import Project, ProjectStage
 
 logger = get_logger(__name__)
@@ -41,6 +45,11 @@ def convert_video_task(
     output_width: int,
     inference_width: int,
 ) -> None:
+    """Convert video to JPEGs and populate database with Image records.
+
+    This runs in a background thread, so we need to use synchronous database operations.
+    """
+
     project_id_str = str(project_id)
     logger.info(f"[BG] Starting conversion for project {project_id}")
     _conversion_progress[project_id_str] = {"saved": 0, "total": 0, "error": False}
@@ -85,6 +94,59 @@ def convert_video_task(
         logger.error(
             f"[BG] Failed to generate thumbnail for project {project_id}: {thumb_err}",
             exc_info=thumb_err,
+        )
+        _conversion_progress[project_id_str]["error"] = True
+        return
+
+    # Populate database with Image records
+    try:
+        logger.info(f"[BG] Creating Image records in database for project {project_id}")
+
+        # Create synchronous database engine for background thread
+        # Convert async URL to sync URL
+        db_url = settings.get_database_url()
+        if "postgresql+asyncpg" in db_url:
+            sync_url = db_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+        elif "sqlite+aiosqlite" in db_url:
+            sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
+        else:
+            sync_url = db_url
+
+        engine = create_engine(sync_url)
+
+        with Session(engine) as session:
+            # Get all frame files
+            inference_files = sorted(inference_dir.glob("frame_*.jpg"))
+            output_files = sorted(output_dir.glob("frame_*.jpg"))
+
+            # Create Image records for each frame
+            for inf_file, out_file in zip(inference_files, output_files, strict=False):
+                frame_number = int(inf_file.stem.split("_")[1])
+
+                # Construct relative paths from project directory
+                inf_rel_path = str(inf_file.relative_to(Path(settings.PROJECTS_ROOT_DIR)))
+                out_rel_path = str(out_file.relative_to(Path(settings.PROJECTS_ROOT_DIR)))
+
+                image = Image(
+                    project_id=project_id,
+                    frame_number=frame_number,
+                    inference_path=inf_rel_path,
+                    output_path=out_rel_path,
+                    status=ImageStatus.PROCESSED,
+                    manually_labeled=False,
+                    validation=ValidationStatus.NOT_VALIDATED,
+                )
+                session.add(image)
+
+            session.commit()
+            logger.info(
+                f"[BG] Created {len(inference_files)} Image records for project {project_id}"
+            )
+
+    except Exception as db_err:
+        logger.error(
+            f"[BG] Failed to create Image records for project {project_id}: {db_err}",
+            exc_info=db_err,
         )
         _conversion_progress[project_id_str]["error"] = True
 
@@ -877,4 +939,122 @@ async def cancel_video_upload(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel upload",
+        ) from e
+
+
+# ===== Image/Frame Endpoints =====
+
+
+@router.get("/projects/{project_id}/images", response_model=ImageListResponse)
+async def list_project_images(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ImageListResponse:
+    """List all images/frames for a project.
+
+    Returns all images for a project with their status information.
+    Used by the manual labeling UI to track frame status.
+
+    Args:
+        project_id: ID of the project
+        db: Database session dependency
+
+    Returns:
+        ImageListResponse: List of all images with their metadata
+
+    Raises:
+        HTTPException: If project not found or database query fails
+    """
+    try:
+        # Verify project exists
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+
+        if not db_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found",
+            )
+
+        # Query all images for this project, ordered by frame number
+        images_result = await db.execute(
+            select(Image).where(Image.project_id == project_id).order_by(Image.frame_number)
+        )
+        images = images_result.scalars().all()
+
+        return ImageListResponse(
+            images=[ImageResponse.model_validate(img) for img in images],
+            total=len(images),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list images for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list images: {e!s}",
+        ) from e
+
+
+@router.get("/projects/{project_id}/frames/{frame_number}")
+async def get_frame_image(
+    project_id: UUID,
+    frame_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """Get the inference-resolution image for a specific frame.
+
+    Serves the JPEG file for displaying in the manual labeling UI canvas.
+
+    Args:
+        project_id: ID of the project
+        frame_number: Frame number (0-indexed)
+        db: Database session dependency
+
+    Returns:
+        FileResponse: JPEG image file
+
+    Raises:
+        HTTPException: If project, image, or file not found
+    """
+    try:
+        # Verify project exists
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        db_project = result.scalar_one_or_none()
+
+        if not db_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found",
+            )
+
+        # Construct path to inference image
+        # Images are stored as frame_NNNNNN.jpg where NNNNNN is zero-padded frame number
+        frame_path = (
+            Path(settings.PROJECTS_ROOT_DIR)
+            / str(project_id)
+            / "inference"
+            / f"frame_{frame_number:06d}.jpg"
+        )
+
+        if not frame_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Frame {frame_number} not found or not yet generated",
+            )
+
+        return FileResponse(
+            str(frame_path),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get frame {frame_number} for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get frame image",
         ) from e

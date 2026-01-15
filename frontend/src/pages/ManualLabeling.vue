@@ -147,6 +147,16 @@ interface Project {
   export_visited: boolean;
 }
 
+interface ImageData {
+  id: string;
+  frame_number: number;
+  inference_path: string | null;
+  output_path: string | null;
+  status: string;
+  manually_labeled: boolean;
+  validation: string;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -157,7 +167,8 @@ const api = axios.create({
 
 const loading = ref(true);
 const project = ref<Project | null>(null);
-const currentFrameNumber = ref(1);
+const images = ref<ImageData[]>([]);
+const currentFrameNumber = ref(0);
 const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
 const viewerWidth = ref(1200);
@@ -165,8 +176,14 @@ const viewerHeight = ref(800);
 const bigJumpSize = ref(100); // TODO[NAV-004]: Load from config
 
 const currentImage = computed(() => {
-  // TODO[CANVAS-003]: Load actual image data
-  return currentFrameNumber.value <= totalFrames.value;
+  if (images.value.length === 0) return null;
+  const img = images.value.find(img => img.frame_number === currentFrameNumber.value);
+  console.log('currentImage computed:', { 
+    frameNumber: currentFrameNumber.value, 
+    found: !!img,
+    totalImages: images.value.length 
+  });
+  return img;
 });
 
 const currentImageUrl = computed(() => {
@@ -175,8 +192,24 @@ const currentImageUrl = computed(() => {
 });
 
 const frameStatus = computed(() => {
-  // TODO[CANVAS-003]: Implement actual status tracking
+  if (!currentImage.value) return 'No Image';
+  
+  // Determine status based on image data
+  if (currentImage.value.validation === 'passed') {
+    return 'Validated';
+  } else if (currentImage.value.validation === 'failed') {
+    return 'Failed Validation';
+  } else if (currentImage.value.manually_labeled) {
+    return 'Manually Labeled';
+  } else if (currentImage.value.status === 'processed') {
   return 'Unlabeled';
+  } else if (currentImage.value.status === 'pending') {
+    return 'Processing';
+  } else if (currentImage.value.status === 'failed') {
+    return 'Processing Failed';
+  }
+  
+  return 'Unknown';
 });
 
 async function fetchProject(): Promise<void> {
@@ -206,22 +239,49 @@ function resetView(): void {
   console.log('Reset view requested');
 }
 
+async function fetchImages(): Promise<void> {
+  try {
+    console.log('Fetching images for project:', projectId);
+    const { data } = await api.get<{ images: ImageData[]; total: number }>(`/projects/${projectId}/images`);
+    console.log('Fetched images:', { total: data.total, count: data.images?.length });
+    images.value = data.images || [];
+    totalFrames.value = data.total || 0;
+    
+    // Set current frame to first available frame
+    if (images.value.length > 0) {
+      currentFrameNumber.value = images.value[0].frame_number;
+      console.log('Set current frame to:', currentFrameNumber.value);
+    } else {
+      console.warn('No images found for project');
+    }
+  } catch (error) {
+    console.error('Failed to fetch images:', error);
+    images.value = [];
+    totalFrames.value = 0;
+  }
+}
+
 function goToFrame(): void {
-  if (frameInput.value !== null && frameInput.value >= 1 && frameInput.value <= totalFrames.value) {
+  if (frameInput.value !== null) {
+    const targetFrame = images.value.find(img => img.frame_number === frameInput.value);
+    if (targetFrame) {
     currentFrameNumber.value = frameInput.value;
     frameInput.value = null;
+    }
   }
 }
 
 function nextFrame(): void {
-  if (currentFrameNumber.value < totalFrames.value) {
-    currentFrameNumber.value++;
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex >= 0 && currentIndex < images.value.length - 1) {
+    currentFrameNumber.value = images.value[currentIndex + 1].frame_number;
   }
 }
 
 function previousFrame(): void {
-  if (currentFrameNumber.value > 1) {
-    currentFrameNumber.value--;
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex > 0) {
+    currentFrameNumber.value = images.value[currentIndex - 1].frame_number;
   }
 }
 
@@ -236,7 +296,11 @@ function previousLabeledFrame(): void {
 }
 
 function bigJump(): void {
-  currentFrameNumber.value = Math.min(currentFrameNumber.value + bigJumpSize.value, totalFrames.value);
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex >= 0) {
+    const targetIndex = Math.min(currentIndex + bigJumpSize.value, images.value.length - 1);
+    currentFrameNumber.value = images.value[targetIndex].frame_number;
+  }
 }
 
 function handleKeyDown(event: KeyboardEvent): void {
@@ -289,12 +353,12 @@ onMounted(async () => {
     if (manualRes.data) {
       project.value = manualRes.data;
     }
+    
+    // Load images from backend
+    await fetchImages();
   } catch (error) {
-    console.error('Failed during stage initialization:', error);
+    console.error('Failed during initialization:', error);
   }
-  
-  // TODO[CANVAS-003]: Load frames and set totalFrames
-  totalFrames.value = 100; // Placeholder
   
   loading.value = false;
 

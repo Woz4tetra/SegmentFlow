@@ -177,6 +177,12 @@ async function startManualLabeling(): Promise<void> {
 async function fetchVideoInfo() {
   const { data } = await api.get<{ fps: number; frame_count: number; width: number; height: number; duration: number }>(`/projects/${projectId}/video_info`);
   duration.value = data?.duration ?? 0;
+  // Set conversion total to frame count (indicates conversion is complete)
+  if (data?.frame_count > 0) {
+    conversionTotal.value = data.frame_count;
+    conversionInProgress.value = false;
+    console.log('[Trim] Frame count from video_info:', data.frame_count);
+  }
   // Default end to full duration if not already set
   if (endSec.value === 0 && duration.value > 0) {
     endSec.value = duration.value;
@@ -266,18 +272,26 @@ onMounted(async () => {
     
     // Fetch fresh project data
     await fetchProject();
+    
+    // Fetch video info FIRST to get duration and frame count
     await fetchVideoInfo();
     
-    // Check if conversion is still in progress
-    const inProgress = await checkConversionProgress();
-    console.log('[Trim] Conversion progress check:', { 
-      saved: conversionSaved.value, 
-      total: conversionTotal.value, 
-      inProgress 
-    });
-    if (inProgress) {
-      console.log('[Trim] Starting conversion polling');
-      startConversionPolling();
+    // Now check if we need to poll for conversion (only if no frame count found)
+    if (conversionTotal.value === 0) {
+      console.log('[Trim] No frames found, checking conversion progress...');
+      const inProgress = await checkConversionProgress();
+      console.log('[Trim] Conversion progress check:', { 
+        saved: conversionSaved.value, 
+        total: conversionTotal.value, 
+        inProgress 
+      });
+      if (inProgress) {
+        console.log('[Trim] Starting conversion polling');
+        startConversionPolling();
+      }
+    } else {
+      console.log('[Trim] Found frames, conversion is complete:', { total: conversionTotal.value });
+      conversionInProgress.value = false;
     }
   } finally {
     loading.value = false;
