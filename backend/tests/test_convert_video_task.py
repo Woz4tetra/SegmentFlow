@@ -7,7 +7,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.projects import conversion_progress, convert_video_task
+from app.api.v1.endpoints.projects.complete_video_upload import convert_video_task
+from app.api.v1.endpoints.projects.shared_objects import conversion_progress
 from app.core.config import settings
 from app.models.image import ImageStatus, ValidationStatus
 

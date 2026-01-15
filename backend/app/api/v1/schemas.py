@@ -380,13 +380,70 @@ class SAMMaskResponse(BaseModel):
         project_id: UUID of the project
         frame_number: Frame number inference was performed on
         label_id: UUID of the label/object class
-        mask_rle: Run-length encoded mask for efficient transmission
-        mask_bbox: Bounding box [x, y, width, height] in pixel coordinates
-        request_id: Client request ID if provided
+        mask_rle: Run-length encoded mask for efficient transmission (optional)
+        mask_bbox: Bounding box [x, y, width, height] in pixel coordinates (optional)
+        request_id: Client request ID if provided (optional)
         inference_time_ms: Time taken for inference in milliseconds
         status: Response status (success, error)
-        error: Error message if status is error
+        error: Error message if status is error (optional)
     """
+
+    project_id: UUID = Field(..., description="Project UUID")
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    label_id: UUID = Field(..., description="Label/object UUID")
+    mask_rle: str | None = Field(
+        None,
+        description="Run-length encoded mask (present when status is success)",
+    )
+    mask_bbox: list[int] | None = Field(
+        None,
+        description="Bounding box [x, y, width, height] in pixels (present when status is success)",
+    )
+    request_id: str | None = Field(None, description="Client request ID if provided")
+    inference_time_ms: float = Field(..., ge=0, description="Inference time in milliseconds")
+    status: str = Field(..., description="Response status: success or error")
+    error: str | None = Field(
+        None,
+        description="Error message if status is error",
+    )
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        """Validate status is either 'success' or 'error'.
+
+        Args:
+            v: Status value to validate
+
+        Returns:
+            str: The validated status value
+
+        Raises:
+            ValueError: If status is not 'success' or 'error'
+        """
+        if v not in {"success", "error"}:
+            msg = f"Status must be 'success' or 'error', got '{v}'"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("mask_bbox")
+    @classmethod
+    def validate_mask_bbox(cls, v: list[int] | None) -> list[int] | None:
+        """Validate mask_bbox has exactly 4 elements if provided.
+
+        Args:
+            v: Bounding box to validate
+
+        Returns:
+            list[int] | None: The validated bounding box
+
+        Raises:
+            ValueError: If bbox doesn't have exactly 4 elements
+        """
+        if v is not None and len(v) != 4:
+            msg = f"mask_bbox must have exactly 4 elements [x, y, width, height], got {len(v)}"
+            raise ValueError(msg)
+        return v
 
 
 # ===== Labeled Points and Masks Schemas =====
@@ -477,7 +534,6 @@ class SaveMaskRequest(BaseModel):
 
     project_id: UUID = Field(..., description="Project UUID")
     frame_number: int = Field(..., ge=0, description="Frame number")
-    label_id: UUID = Field(..., description="Label/object UUID")
     mask_rle: str | None = Field(None, description="Run-length encoded mask")
     mask_bbox: list[int] | None = Field(
         None,

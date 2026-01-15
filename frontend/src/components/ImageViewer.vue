@@ -907,10 +907,23 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 
 async function savePoints(): Promise<void> {
   if (!props.projectId || !props.frameNumber || !props.selectedLabelId || points.value.length === 0) {
+    console.warn('Cannot save points: missing required data', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      selectedLabelId: props.selectedLabelId,
+      pointsCount: points.value.length,
+    });
     return;
   }
 
   try {
+    console.log('Saving points:', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      labelId: props.selectedLabelId,
+      pointsCount: points.value.length,
+    });
+    
     const response = await api.post(
       `/projects/${props.projectId}/frames/${props.frameNumber}/points`,
       {
@@ -922,21 +935,42 @@ async function savePoints(): Promise<void> {
         })),
       }
     );
-    console.log('Points saved:', response.data);
-  } catch (error) {
+    console.log('Points saved successfully:', response.data);
+  } catch (error: any) {
     console.error('Failed to save points:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
   }
 }
 
 async function saveMask(maskData: MaskData): Promise<void> {
   if (!props.projectId || !props.frameNumber || !props.selectedLabelId) {
+    console.warn('Cannot save mask: missing required data', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      selectedLabelId: props.selectedLabelId,
+    });
     return;
   }
 
   try {
+    console.log('Saving mask:', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      labelId: props.selectedLabelId,
+      imageWidth: imageWidth.value,
+      imageHeight: imageHeight.value,
+    });
+    
     // Convert RLE mask to contour polygon
     const contourPolygon = rleToContour(maskData.rle, imageWidth.value, imageHeight.value);
     const area = calculateMaskArea(maskData.rle, imageWidth.value, imageHeight.value);
+
+    console.log('Mask conversion:', {
+      contourPoints: contourPolygon.length,
+      area: area,
+    });
 
     const response = await api.post(
       `/projects/${props.projectId}/frames/${props.frameNumber}/masks`,
@@ -948,9 +982,12 @@ async function saveMask(maskData: MaskData): Promise<void> {
         },
       }
     );
-    console.log('Mask saved:', response.data);
-  } catch (error) {
+    console.log('Mask saved successfully:', response.data);
+  } catch (error: any) {
     console.error('Failed to save mask:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
   }
 }
 
@@ -1022,16 +1059,35 @@ function calculateMaskArea(rle: string, width: number, height: number): number {
 }
 
 async function loadExistingData(): Promise<void> {
-  if (!props.projectId || !props.frameNumber || !props.selectedLabelId) {
+  if (!props.projectId || !props.frameNumber || !fabricCanvas || !fabricImg) {
+    console.warn('Cannot load existing data: missing required data', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      hasCanvas: !!fabricCanvas,
+      hasImg: !!fabricImg,
+    });
     return;
   }
 
   try {
-    // Load existing points
+    console.log('Loading existing data for:', {
+      projectId: props.projectId,
+      frameNumber: props.frameNumber,
+      selectedLabelId: props.selectedLabelId,
+    });
+    
+    // Load existing points for the current label (if selected) or all points
+    const pointsParams: { label_id?: string } = {};
+    if (props.selectedLabelId) {
+      pointsParams.label_id = props.selectedLabelId;
+    }
+    
     const pointsResponse = await api.get(
       `/projects/${props.projectId}/frames/${props.frameNumber}/points`,
-      { params: { label_id: props.selectedLabelId } }
+      { params: pointsParams }
     );
+    
+    console.log('Points response:', pointsResponse.data);
     
     if (pointsResponse.data && pointsResponse.data.length > 0) {
       // Clear existing points
@@ -1070,26 +1126,40 @@ async function loadExistingData(): Promise<void> {
         }
       }
       console.log('Loaded existing points:', points.value.length);
+    } else {
+      console.log('No existing points found');
     }
     
-    // Load existing masks
+    // Load existing masks for the current label (if selected) or all masks
+    const masksParams: { label_id?: string } = {};
+    if (props.selectedLabelId) {
+      masksParams.label_id = props.selectedLabelId;
+    }
+    
     const masksResponse = await api.get(
       `/projects/${props.projectId}/frames/${props.frameNumber}/masks`,
-      { params: { label_id: props.selectedLabelId } }
+      { params: masksParams }
     );
     
+    console.log('Masks response:', masksResponse.data);
+    
     if (masksResponse.data && masksResponse.data.length > 0) {
-      // For now, we'll just note that masks exist
-      // In the future, we could render them
       console.log('Loaded existing masks:', masksResponse.data.length);
+      // Note: Rendering masks from contour polygons would require converting back to RLE
+      // For now, we just log that masks exist
+    } else {
+      console.log('No existing masks found');
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to load existing data:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
   }
 }
 
 // Watch for image URL changes
-watch(() => props.imageUrl, async (newUrl) => {
+watch(() => props.imageUrl, (newUrl) => {
   if (newUrl) {
     loadImage(newUrl);
     // Clear points when image changes
@@ -1112,11 +1182,22 @@ watch(() => props.imageUrl, async (newUrl) => {
       fabricCanvas.remove(maskOverlay);
       maskOverlay = null;
     }
-    
-    // Load existing points and masks for this frame
-    await loadExistingData();
   }
 }, { immediate: true });
+
+// Watch for frame number changes to reload data
+watch(() => props.frameNumber, async () => {
+  if (fabricCanvas && fabricImg && props.projectId && props.frameNumber !== undefined) {
+    await loadExistingData();
+  }
+});
+
+// Watch for selected label changes to reload data
+watch(() => props.selectedLabelId, async () => {
+  if (fabricCanvas && fabricImg && props.projectId && props.frameNumber !== undefined) {
+    await loadExistingData();
+  }
+});
 
 // Expose reset view function and points
 defineExpose({
