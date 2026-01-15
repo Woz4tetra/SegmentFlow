@@ -49,7 +49,7 @@ async def sam3_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """
     sam3_tracker = get_primary_tracker()
     sam3_trackers = get_all_trackers()
-    
+
     if not sam3_trackers:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

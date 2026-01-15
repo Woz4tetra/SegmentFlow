@@ -110,6 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Cleanup SAM3 trackers
     from app.core.sam3_state import get_all_trackers
+
     for gpu_id, tracker in get_all_trackers().items():
         try:
             tracker.cleanup()

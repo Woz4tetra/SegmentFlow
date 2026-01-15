@@ -13,7 +13,7 @@ sam3_trackers: dict[int, SAM3Tracker] = {}  # All instances by GPU ID
 
 def set_trackers(primary: SAM3Tracker | None, all_trackers: dict[int, SAM3Tracker]) -> None:
     """Set the global tracker instances.
-    
+
     Args:
         primary: Primary tracker instance (GPU 0) or None
         all_trackers: Dictionary of all tracker instances by GPU ID
@@ -25,7 +25,7 @@ def set_trackers(primary: SAM3Tracker | None, all_trackers: dict[int, SAM3Tracke
 
 def get_primary_tracker() -> SAM3Tracker | None:
     """Get the primary tracker instance.
-    
+
     Returns:
         Primary tracker or None if not initialized
     """
@@ -34,7 +34,7 @@ def get_primary_tracker() -> SAM3Tracker | None:
 
 def get_all_trackers() -> dict[int, SAM3Tracker]:
     """Get all tracker instances.
-    
+
     Returns:
         Dictionary of all tracker instances by GPU ID
     """

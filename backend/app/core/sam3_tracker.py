@@ -79,7 +79,9 @@ class SAM3Tracker:
         # Set up device (model loaded lazily on first use)
         self.device = torch.device(f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu")
 
-        logger.info(f"SAM3Tracker initialized for GPU {self.gpu_id}, inference width: {inference_width}")
+        logger.info(
+            f"SAM3Tracker initialized for GPU {self.gpu_id}, inference width: {inference_width}"
+        )
 
     def _setup_device_optimizations(self) -> None:
         """Enable optimizations for the GPU (call once before using GPU)."""
@@ -140,7 +142,6 @@ class SAM3Tracker:
         gc.collect()
 
         logger.info(f"Model unloaded from cuda:{self.gpu_id}")
-
 
     def _load_model_on_current_gpu(self) -> None:
         """Load SAM3 model on the GPU device."""
@@ -236,7 +237,9 @@ class SAM3Tracker:
         self.scaled_height = self.scaled_height - (self.scaled_height % 2)
 
         logger.info(f"Images: {self.image_width}x{self.image_height}, {self.total_frames} frames")
-        logger.info(f"Inference width: {self.inference_width} -> {self.scaled_width}x{self.scaled_height}")
+        logger.info(
+            f"Inference width: {self.inference_width} -> {self.scaled_width}x{self.scaled_height}"
+        )
 
         # Clean up any previous temp directory
         self._cleanup_temp_dir()
