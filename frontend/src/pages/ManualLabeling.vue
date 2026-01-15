@@ -32,6 +32,10 @@
           :image-url="currentImageUrl"
           :width="viewerWidth"
           :height="viewerHeight"
+          :project-id="projectId"
+          :frame-number="currentFrameNumber"
+          :selected-label-id="selectedLabel?.id"
+          :selected-label-color="selectedLabel?.color_hex || '#2563eb'"
         />
         <div v-else class="no-image">
           No images available. Please complete the trim stage first.
@@ -122,6 +126,32 @@
             </div>
           </div>
         </div>
+
+        <!-- Label Selection -->
+        <div class="control-section">
+          <h3>Active Label</h3>
+          <div v-if="labels.length === 0" class="no-labels">
+            <p>No labels available</p>
+            <p class="hint">Create labels in the Labels page first</p>
+          </div>
+          <div v-else class="label-selector">
+            <div 
+              v-for="label in labels" 
+              :key="label.id"
+              @click="selectLabel(label)"
+              :class="['label-option', { active: selectedLabel?.id === label.id }]"
+            >
+              <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
+              <span class="label-name">{{ label.name }}</span>
+            </div>
+          </div>
+          <div v-if="selectedLabel" class="mode-info">
+            <p class="mode-label">Click Mode:</p>
+            <p class="mode-keys">
+              <kbd>I</kbd> Include • <kbd>U</kbd> Exclude
+            </p>
+          </div>
+        </div>
       </div>
     </div>
     </div>
@@ -157,6 +187,13 @@ interface ImageData {
   validation: string;
 }
 
+interface Label {
+  id: string;
+  name: string;
+  color_hex: string;
+  thumbnail_path: string | null;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -168,6 +205,8 @@ const api = axios.create({
 const loading = ref(true);
 const project = ref<Project | null>(null);
 const images = ref<ImageData[]>([]);
+const labels = ref<Label[]>([]);
+const selectedLabel = ref<Label | null>(null);
 const currentFrameNumber = ref(0);
 const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
@@ -231,6 +270,29 @@ async function markStageVisited(): Promise<void> {
   } catch (error) {
     console.error('Failed to mark stage as visited:', error);
   }
+}
+
+async function fetchLabels(): Promise<void> {
+  try {
+    console.log('Fetching labels');
+    const { data } = await api.get<Label[]>('/labels');
+    console.log('Fetched labels:', data.length);
+    labels.value = data || [];
+    
+    // Auto-select first label if available
+    if (labels.value.length > 0 && !selectedLabel.value) {
+      selectedLabel.value = labels.value[0];
+      console.log('Auto-selected first label:', selectedLabel.value.name);
+    }
+  } catch (error) {
+    console.error('Failed to fetch labels:', error);
+    labels.value = [];
+  }
+}
+
+function selectLabel(label: Label): void {
+  selectedLabel.value = label;
+  console.log('Selected label:', label.name);
 }
 
 function resetView(): void {
@@ -354,8 +416,8 @@ onMounted(async () => {
       project.value = manualRes.data;
     }
     
-    // Load images from backend
-    await fetchImages();
+    // Load images and labels from backend
+    await Promise.all([fetchImages(), fetchLabels()]);
   } catch (error) {
     console.error('Failed during initialization:', error);
   }
@@ -724,6 +786,114 @@ h1 {
   font-weight: 600;
   font-size: 0.8rem;
   text-transform: capitalize;
+}
+
+.no-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--surface-muted, #f9fafb);
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  text-align: center;
+}
+
+.no-labels p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted, #6b7280);
+}
+
+.no-labels .hint {
+  font-size: 0.75rem;
+  color: var(--muted, #9ca3af);
+}
+
+.label-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--surface-muted, #f9fafb);
+  border: 2px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.label-option:hover {
+  background: var(--surface, #ffffff);
+  border-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.label-option.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(124, 58, 237, 0.05));
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.label-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.label-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.mode-info {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(124, 58, 237, 0.03));
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+.mode-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mode-keys {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mode-keys kbd {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2563eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .ghost {

@@ -333,7 +333,7 @@ async def sam3_inference_websocket(websocket: WebSocket) -> None:
                             queue_size=queue_size,
                             processing=_is_processing,
                             estimated_wait_ms=queue_size * 50.0,  # Estimate 50ms per request
-                        ).model_dump()
+                        ).model_dump(mode='json')
                     )
 
                     # Process queue if not already processing
@@ -366,6 +366,7 @@ async def _process_queue() -> None:
 
     This runs as a background task and processes requests one at a time
     to ensure GPU memory stability and predictable latency.
+    Maintains request order and provides status updates for each processed item.
     """
     global _is_processing
 
@@ -378,20 +379,38 @@ async def _process_queue() -> None:
             db = queue_item["db"]
 
             try:
+                # Log queue processing
+                logger.debug(
+                    f"Processing SAM request from queue: frame={request.frame_number}, "
+                    f"label={request.label_id}, request_id={request.request_id}"
+                )
+
                 # Process request
                 response = await _process_sam_request(request, db)
 
-                # Send response
-                await websocket.send_json(response.model_dump())
+                # Send response with request_id to maintain ordering on client
+                # Use mode='json' to properly serialize UUID fields
+                await websocket.send_json(response.model_dump(mode='json'))
+
+                # Log successful processing
+                logger.debug(
+                    f"Sent SAM response: status={response.status}, "
+                    f"inference_time={response.inference_time_ms:.2f}ms"
+                )
 
             except Exception as e:
                 logger.error(f"Error processing queued SAM request: {e}", exc_info=True)
                 with contextlib.suppress(Exception):
                     # Websocket may be closed, ignore send errors
+                    # Convert all UUID fields to strings for JSON serialization
                     await websocket.send_json(
                         {
                             "status": "error",
                             "error": f"Processing error: {e}",
+                            "request_id": request.request_id,
+                            "project_id": str(request.project_id),
+                            "frame_number": request.frame_number,
+                            "label_id": str(request.label_id),
                         }
                     )
 
@@ -401,3 +420,4 @@ async def _process_queue() -> None:
     finally:
         async with _processing_lock:
             _is_processing = False
+            logger.debug("SAM queue processing completed")

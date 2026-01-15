@@ -34,12 +34,32 @@ interface Props {
   imageUrl: string;
   width?: number;
   height?: number;
+  projectId?: string;
+  frameNumber?: number;
+  selectedLabelId?: string;
+  selectedLabelColor?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   width: 1200,
   height: 800,
+  projectId: '',
+  frameNumber: 0,
+  selectedLabelId: '',
+  selectedLabelColor: '#2563eb',
 });
+
+interface Point {
+  x: number;
+  y: number;
+  include: boolean; // true = include (1), false = exclude (0)
+  id: string;
+}
+
+interface MaskData {
+  rle: string;
+  bbox: number[];
+}
 
 const containerRef = ref<HTMLElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -61,6 +81,17 @@ let windowMouseUpHandler: ((e: MouseEvent) => void) | null = null;
 // Image dimensions
 const imageWidth = ref(0);
 const imageHeight = ref(0);
+
+// Point clicking state (CANVAS-003)
+const includeMode = ref(true); // true = include (I key), false = exclude (U key)
+const points = ref<Point[]>([]); // Store clicked points
+const currentMask = ref<MaskData | null>(null); // Current SAM mask
+let maskOverlay: fabric.Image | null = null; // Fabric image for mask overlay
+
+// WebSocket connection (SAM-003)
+let websocket: WebSocket | null = null;
+const wsConnected = ref(false);
+const pendingRequests = new Map<string, { resolve: (mask: MaskData | null) => void; reject: (error: any) => void }>();
 
 function loadImage(url: string): void {
   const img = new Image();
@@ -190,13 +221,18 @@ function setupEventHandlers(): void {
     return false;
   });
   
-  // Attach mousedown to container - right mouse button only
+  // Attach mousedown to container
   container.addEventListener('mousedown', (e) => {
     if (e.button === 2) {
       // Right click - prevent context menu and handle panning
       e.preventDefault();
       e.stopPropagation();
       handleMouseDown(e);
+    } else if (e.button === 0) {
+      // Left click - add point for SAM inference
+      e.preventDefault();
+      e.stopPropagation();
+      handleLeftClick(e);
     }
   });
   
@@ -207,9 +243,16 @@ function setupEventHandlers(): void {
         e.preventDefault();
         e.stopPropagation();
         handleMouseDown(e);
+      } else if (e.button === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleLeftClick(e);
       }
     });
   }
+  
+  // Set initial cursor
+  container.style.cursor = includeMode.value ? 'crosshair' : 'not-allowed';
   
   // Attach wheel to container
   container.addEventListener('wheel', handleWheel, { passive: false });
@@ -340,30 +383,351 @@ function handleWheel(e: WheelEvent): void {
   scale.value = newScale;
 }
 
+function handleLeftClick(e: MouseEvent): void {
+  if (!fabricCanvas || !fabricImg || !props.projectId || !props.selectedLabelId) {
+    console.warn('Cannot add point: missing required data');
+    return;
+  }
+
+  // Get click position relative to canvas
+  const rect = containerRef.value!.getBoundingClientRect();
+  const canvasX = e.clientX - rect.left;
+  const canvasY = e.clientY - rect.top;
+
+  // Convert canvas coordinates to image coordinates
+  const imgLeft = fabricImg.left || 0;
+  const imgTop = fabricImg.top || 0;
+  const imgScaleX = fabricImg.scaleX || 1;
+
+  const imgX = (canvasX - imgLeft) / imgScaleX;
+  const imgY = (canvasY - imgTop) / imgScaleX;
+
+  // Normalize to [0, 1] range for SAM
+  const normalizedX = imgX / imageWidth.value;
+  const normalizedY = imgY / imageHeight.value;
+
+  // Validate coordinates are within image bounds
+  if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
+    console.warn('Click outside image bounds');
+    return;
+  }
+
+  // Add point
+  const point: Point = {
+    x: normalizedX,
+    y: normalizedY,
+    include: includeMode.value,
+    id: `${Date.now()}-${Math.random()}`,
+  };
+
+  points.value.push(point);
+  console.log('Added point:', point);
+
+  // Render point visual
+  renderPoint(point, canvasX, canvasY);
+
+  // Send to SAM for inference
+  requestSAMInference();
+}
+
+function renderPoint(point: Point, canvasX: number, canvasY: number): void {
+  if (!fabricCanvas) return;
+
+  const color = point.include ? props.selectedLabelColor : '#ef4444'; // Red for exclude
+  const radius = 6;
+
+  // Create circle for the point
+  const circle = new fabric.Circle({
+    left: canvasX - radius,
+    top: canvasY - radius,
+    radius: radius,
+    fill: color,
+    stroke: '#ffffff',
+    strokeWidth: 2,
+    selectable: false,
+    evented: false,
+    shadow: new fabric.Shadow({
+      color: 'rgba(0, 0, 0, 0.3)',
+      blur: 4,
+      offsetX: 0,
+      offsetY: 2,
+    }),
+  });
+
+  fabricCanvas.add(circle);
+  fabricCanvas.bringToFront(circle);
+  fabricCanvas.renderAll();
+}
+
+async function requestSAMInference(): Promise<void> {
+  if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+    console.error('WebSocket not connected');
+    return;
+  }
+
+  if (points.value.length === 0) {
+    console.warn('No points to send');
+    return;
+  }
+
+  const requestId = `req-${Date.now()}-${Math.random()}`;
+
+  const request = {
+    project_id: props.projectId,
+    frame_number: props.frameNumber,
+    label_id: props.selectedLabelId,
+    points: points.value.map(p => [p.x, p.y]),
+    labels: points.value.map(p => (p.include ? 1 : 0)),
+    request_id: requestId,
+  };
+
+  console.log('Sending SAM request:', request);
+
+  try {
+    websocket.send(JSON.stringify(request));
+  } catch (error) {
+    console.error('Error sending SAM request:', error);
+  }
+}
+
+function decodeRLE(rle: string, width: number, height: number): Uint8ClampedArray {
+  // Decode run-length encoding to binary mask
+  const mask = new Uint8ClampedArray(width * height);
+  
+  if (!rle || rle.length === 0) {
+    return mask;
+  }
+
+  const pairs = rle.split(';');
+  
+  for (const pair of pairs) {
+    const [startStr, lengthStr] = pair.split(',');
+    const start = parseInt(startStr, 10);
+    const length = parseInt(lengthStr, 10);
+    
+    if (isNaN(start) || isNaN(length)) continue;
+    
+    for (let i = 0; i < length; i++) {
+      const idx = start + i;
+      if (idx < mask.length) {
+        mask[idx] = 255;
+      }
+    }
+  }
+  
+  return mask;
+}
+
+function renderMask(): void {
+  if (!fabricCanvas || !currentMask.value || !fabricImg) {
+    return;
+  }
+
+  // Remove old mask overlay if exists
+  if (maskOverlay) {
+    fabricCanvas.remove(maskOverlay);
+    maskOverlay = null;
+  }
+
+  const width = imageWidth.value;
+  const height = imageHeight.value;
+
+  // Decode RLE to binary mask
+  const maskData = decodeRLE(currentMask.value.rle, width, height);
+
+  // Create RGBA image data for the mask overlay
+  const imageData = new ImageData(width, height);
+  const color = hexToRgb(props.selectedLabelColor);
+
+  for (let i = 0; i < maskData.length; i++) {
+    const alpha = maskData[i];
+    if (alpha > 0) {
+      const pixelIdx = i * 4;
+      imageData.data[pixelIdx] = color.r;
+      imageData.data[pixelIdx + 1] = color.g;
+      imageData.data[pixelIdx + 2] = color.b;
+      imageData.data[pixelIdx + 3] = 128; // 50% transparency
+    }
+  }
+
+  // Create temporary canvas to hold the mask
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const ctx = tempCanvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.putImageData(imageData, 0, 0);
+
+  // Create fabric image from the mask canvas
+  maskOverlay = new fabric.Image(tempCanvas, {
+    left: fabricImg.left,
+    top: fabricImg.top,
+    scaleX: fabricImg.scaleX,
+    scaleY: fabricImg.scaleY,
+    selectable: false,
+    evented: false,
+    opacity: 0.5,
+  });
+
+  fabricCanvas.add(maskOverlay);
+  // Ensure mask is above image but below points
+  fabricCanvas.moveTo(maskOverlay, 1);
+  fabricCanvas.renderAll();
+
+  console.log('Rendered mask overlay');
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  // Remove # if present
+  hex = hex.replace('#', '');
+  
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  
+  return { r, g, b };
+}
+
 // Watch for image URL changes
 watch(() => props.imageUrl, (newUrl) => {
   if (newUrl) {
     loadImage(newUrl);
+    // Clear points when image changes
+    points.value = [];
+    currentMask.value = null;
+    if (maskOverlay && fabricCanvas) {
+      fabricCanvas.remove(maskOverlay);
+      maskOverlay = null;
+    }
   }
 }, { immediate: true });
 
-// Expose reset view function
+// Expose reset view function and points
 defineExpose({
   resetView,
+  getPoints: () => points.value,
+  clearPoints: () => {
+    points.value = [];
+    currentMask.value = null;
+    if (maskOverlay && fabricCanvas) {
+      fabricCanvas.remove(maskOverlay);
+      maskOverlay = null;
+      fabricCanvas.renderAll();
+    }
+  },
 });
 
+function connectWebSocket(): void {
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    return; // Already connected
+  }
+
+  const wsUrl = `ws://localhost:8000/api/v1/sam3/inference`;
+  console.log('Connecting to SAM WebSocket:', wsUrl);
+
+  websocket = new WebSocket(wsUrl);
+
+  websocket.onopen = () => {
+    console.log('SAM WebSocket connected');
+    wsConnected.value = true;
+  };
+
+  websocket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log('Received SAM response:', data);
+
+      // Handle queue status updates
+      if (data.queue_size !== undefined) {
+        console.log(`Queue status: ${data.queue_size} requests pending`);
+        return;
+      }
+
+      // Handle mask responses
+      if (data.status === 'success' && data.mask_rle) {
+        currentMask.value = {
+          rle: data.mask_rle,
+          bbox: data.mask_bbox || [0, 0, 0, 0],
+        };
+        renderMask();
+
+        // Resolve pending promise if exists
+        if (data.request_id && pendingRequests.has(data.request_id)) {
+          const { resolve } = pendingRequests.get(data.request_id)!;
+          resolve(currentMask.value);
+          pendingRequests.delete(data.request_id);
+        }
+      } else if (data.status === 'error') {
+        console.error('SAM inference error:', data.error);
+        if (data.request_id && pendingRequests.has(data.request_id)) {
+          const { reject } = pendingRequests.get(data.request_id)!;
+          reject(new Error(data.error || 'Unknown error'));
+          pendingRequests.delete(data.request_id);
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing SAM WebSocket message:', error);
+    }
+  };
+
+  websocket.onerror = (error) => {
+    console.error('SAM WebSocket error:', error);
+    wsConnected.value = false;
+  };
+
+  websocket.onclose = () => {
+    console.log('SAM WebSocket closed');
+    wsConnected.value = false;
+    // Attempt to reconnect after delay
+    setTimeout(() => {
+      if (websocket?.readyState === WebSocket.CLOSED) {
+        connectWebSocket();
+      }
+    }, 3000);
+  };
+}
+
+function toggleMode(): void {
+  includeMode.value = !includeMode.value;
+  console.log(`Switched to ${includeMode.value ? 'include' : 'exclude'} mode`);
+  // Update cursor
+  if (containerRef.value && !isDragging.value) {
+    containerRef.value.style.cursor = includeMode.value ? 'crosshair' : 'not-allowed';
+  }
+}
+
 onMounted(() => {
-  // Set up keyboard listener for R key
+  // Set up keyboard listeners
   const handleKeyPress = (e: KeyboardEvent) => {
-    if (e.key === 'r' || e.key === 'R') {
-      // Check if not typing in input
-      if (!(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
-        resetView();
+    // Check if not typing in input
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    const key = e.key.toLowerCase();
+    
+    if (key === 'r') {
+      resetView();
+    } else if (key === 'i') {
+      // Include mode
+      includeMode.value = true;
+      if (containerRef.value && !isDragging.value) {
+        containerRef.value.style.cursor = 'crosshair';
+      }
+    } else if (key === 'u') {
+      // Exclude/Undo mode
+      includeMode.value = false;
+      if (containerRef.value && !isDragging.value) {
+        containerRef.value.style.cursor = 'not-allowed';
       }
     }
   };
   
   window.addEventListener('keydown', handleKeyPress);
+
+  // Connect to WebSocket
+  connectWebSocket();
   
   return () => {
     window.removeEventListener('keydown', handleKeyPress);
@@ -381,6 +745,12 @@ onBeforeUnmount(() => {
     windowMouseUpHandler = null;
   }
   
+  // Close WebSocket
+  if (websocket) {
+    websocket.close();
+    websocket = null;
+  }
+  
   if (fabricCanvas) {
     try {
       fabricCanvas.dispose();
@@ -389,6 +759,7 @@ onBeforeUnmount(() => {
     }
     fabricCanvas = null;
     fabricImg = null;
+    maskOverlay = null;
   }
 });
 </script>
