@@ -63,6 +63,13 @@ services:
       - segmentflow-network
     secrets:
       - postgres_password
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:

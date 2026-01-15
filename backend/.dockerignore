@@ -8,3 +8,9 @@ __pycache__/
 htmlcov/
 .git/
 .gitignore
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+segmentflow.egginfo/
+.coverage
