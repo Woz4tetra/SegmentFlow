@@ -12,18 +12,16 @@ import gc
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 import torch
 from natsort import natsorted
+from sam3.model_builder import build_sam3_video_model  # type: ignore
 from tqdm import tqdm
-
-try:
-    from sam3.model_builder import build_sam3_video_model
-except ImportError:
-    build_sam3_video_model = None
 
 from app.core.logging import get_logger
 
@@ -56,10 +54,10 @@ class SAM3Tracker:
         self.inference_width = inference_width
 
         # Current active model references
-        self.model = None
-        self.predictor = None
-        self.device = None
-        self.inference_state = None
+        self.model: Any = None
+        self.predictor: Any = None
+        self.device: torch.device | None = None
+        self.inference_state: Any = None
 
         # Image folder info (loaded lazily)
         self.images_dir: Path | None = None
@@ -158,10 +156,10 @@ class SAM3Tracker:
         # This ensures all tensors are created on the correct GPU from the start
         with torch.cuda.device(self.gpu_id), torch.autocast("cuda", dtype=torch.bfloat16):
             self.model = build_sam3_video_model()
-            self.model = self.model.to(self.device)
-
-        self.predictor = self.model.tracker
-        self.predictor.backbone = self.model.detector.backbone
+            if self.model is not None:
+                self.model = self.model.to(self.device)
+                self.predictor = self.model.tracker
+                self.predictor.backbone = self.model.detector.backbone
 
         logger.info(f"SAM3 model loaded successfully on cuda:{self.gpu_id}")
 
@@ -392,7 +390,8 @@ class SAM3Tracker:
 
         # Ensure we're on the correct GPU when initializing inference state
         with torch.cuda.device(self.gpu_id):
-            self.inference_state = self.predictor.init_state(video_path=frames_dir)
+            if self.predictor is not None:
+                self.inference_state = self.predictor.init_state(video_path=frames_dir)
 
         logger.info("Inference state initialized")
 
@@ -476,7 +475,7 @@ class SAM3Tracker:
         source_frame: int,
         points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]],
         propagate_length: int,
-        callback=None,
+        callback: Callable[[int, float], None] | None = None,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, np.ndarray]]:
         """Prepare frames, add points, and propagate masks.
 
@@ -526,7 +525,7 @@ class SAM3Tracker:
                 )
 
         # Propagate through frames (ensure correct GPU context)
-        video_segments = {}
+        video_segments: dict[int, dict[int, np.ndarray]] = {}
 
         with torch.cuda.device(self.gpu_id):
             for (

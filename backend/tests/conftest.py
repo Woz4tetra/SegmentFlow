@@ -2,7 +2,9 @@
 
 import os
 from collections.abc import AsyncIterator
+from unittest.mock import MagicMock, patch
 
+import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
@@ -16,6 +18,33 @@ from app.models.labeled_point import LabeledPoint
 from app.models.mask import Mask
 from app.models.project import Project
 from app.models.stats import Stats
+
+
+# Mock SAM3 initialization to avoid GPU/model loading during tests
+@pytest.fixture(scope="session", autouse=True)
+def mock_sam3_model() -> None:
+    """Mock SAM3 model building to prevent GPU loading during tests.
+
+    This fixture automatically runs for all tests and patches the SAM3 model builder
+    to return a mock object, avoiding the need to download and load the actual model.
+    """
+    mock_model = MagicMock()
+    mock_tracker = MagicMock()
+    mock_model.tracker = mock_tracker
+    mock_model.detector = MagicMock()
+    mock_model.detector.backbone = MagicMock()
+
+    # Patch both the source and the imported location
+    patcher1 = patch("sam3.model_builder.build_sam3_video_model", return_value=mock_model)
+    patcher2 = patch("app.core.sam3_tracker.build_sam3_video_model", return_value=mock_model)
+
+    patcher1.start()
+    patcher2.start()
+
+    yield
+
+    patcher1.stop()
+    patcher2.stop()
 
 
 @pytest_asyncio.fixture

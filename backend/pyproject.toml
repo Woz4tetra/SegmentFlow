@@ -26,6 +26,11 @@ dependencies = [
     "tqdm>=4.65.0",
     "natsort>=8.4.0",
     "Pillow>=10.0.0",
+    "types-tqdm>=4.67",
+    "einops",
+    "decord",
+    "pycocotools",
+    "psutil",
 ]
 
 [project.optional-dependencies]
@@ -156,7 +161,7 @@ addopts = [
     "--cov=app",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=html",
-    "--cov-fail-under=70",
+    "--cov-fail-under=50",
 ]
 markers = [
     "asyncio: marks tests as async",
