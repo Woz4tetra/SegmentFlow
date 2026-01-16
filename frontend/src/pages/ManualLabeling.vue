@@ -28,6 +28,7 @@
       <!-- Image Viewer -->
       <div class="viewer-section">
         <ImageViewer 
+          ref="imageViewerRef"
           v-if="currentImage"
           :image-url="currentImageUrl"
           :width="viewerWidth"
@@ -144,7 +145,10 @@
 
         <!-- Label Selection -->
         <div class="control-section">
-          <h3>Active Label</h3>
+          <div class="section-header">
+            <h3>Active Label</h3>
+            <span class="section-hint"><kbd>T</kbd> cycle</span>
+          </div>
           <div v-if="labels.length === 0" class="no-labels">
             <p>No labels available</p>
             <p class="hint">Create labels in the Labels page first</p>
@@ -243,6 +247,7 @@ const viewerHeight = ref(800);
 const bigJumpSize = ref(500); // Default value, will be loaded from server config
 const hoveredLabelId = ref<string | null>(null); // Track which label is being hovered
 const sidebarVisible = ref(true); // Sidebar visibility state
+const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Ref to ImageViewer component
 
 const currentImage = computed(() => {
   if (images.value.length === 0) return null;
@@ -338,6 +343,20 @@ function selectLabel(label: Label): void {
   console.log('Selected label:', label.name);
 }
 
+function cycleToNextLabel(): void {
+  if (labels.value.length === 0) return;
+  
+  if (!selectedLabel.value) {
+    selectedLabel.value = labels.value[0];
+    return;
+  }
+  
+  const currentIndex = labels.value.findIndex(l => l.id === selectedLabel.value?.id);
+  const nextIndex = (currentIndex + 1) % labels.value.length;
+  selectedLabel.value = labels.value[nextIndex];
+  console.log('Switched to label:', selectedLabel.value.name);
+}
+
 function handleThumbnailError(event: Event): void {
   // Hide broken thumbnail images
   const img = event.target as HTMLImageElement;
@@ -347,9 +366,7 @@ function handleThumbnailError(event: Event): void {
 }
 
 function resetView(): void {
-  // This will be handled by the ImageViewer component
-  // For now, just emit an event or use a ref
-  console.log('Reset view requested');
+  imageViewerRef.value?.resetView();
 }
 
 function toggleSidebar(): void {
@@ -481,6 +498,9 @@ function handleKeyDown(event: KeyboardEvent): void {
     case 'f':
     case 'F':
       toggleSidebar();
+      break;
+    case 't':
+      cycleToNextLabel();
       break;
   }
 }
@@ -711,6 +731,40 @@ h1 {
   margin: 0;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.section-header h3 {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.section-hint {
+  font-size: 0.7rem;
+  color: var(--muted, #9ca3af);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.section-hint kbd {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #2563eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .frame-nav {
