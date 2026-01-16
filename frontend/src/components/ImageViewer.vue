@@ -1384,6 +1384,13 @@ defineExpose({
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
   },
+  refreshPointsAndMasks: async () => {
+    // Clear current visuals and reload from server
+    clearAllVisuals();
+    pointsByLabel.value.clear();
+    masksByLabel.value.clear();
+    await loadAllExistingData();
+  },
 });
 
 onMounted(() => {

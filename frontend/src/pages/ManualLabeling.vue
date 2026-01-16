@@ -197,13 +197,26 @@
               <div 
                 v-for="label in labels" 
                 :key="label.id"
-                @click="selectLabel(label)"
-                @mouseenter="hoveredLabelId = label.id"
-                @mouseleave="hoveredLabelId = null"
                 :class="['label-option', { active: selectedLabel?.id === label.id }]"
               >
-                <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
-                <span class="label-name">{{ label.name }}</span>
+                <div 
+                  class="label-option-content"
+                  @click="selectLabel(label)"
+                  @mouseenter="hoveredLabelId = label.id"
+                  @mouseleave="hoveredLabelId = null"
+                >
+                  <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
+                  <span class="label-name">{{ label.name }}</span>
+                </div>
+                <button 
+                  @click.stop="clearLabelFromFrame(label.id)"
+                  class="btn-clear-label"
+                  title="Clear this label from current frame"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                  </svg>
+                </button>
                 <!-- CANVAS-006: Thumbnail preview on hover -->
                 <div 
                   v-if="hoveredLabelId === label.id && label.thumbnail_path" 
@@ -216,6 +229,17 @@
                   />
                 </div>
               </div>
+              <!-- Clear All Button -->
+              <button 
+                @click="showClearAllConfirm = true"
+                class="btn-clear-all"
+                title="Clear all labels from current frame"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/>
+                </svg>
+                Clear All Labels
+              </button>
             </div>
             <div v-if="selectedLabel" class="mode-info">
               <p class="mode-label">Click Mode:</p>
@@ -229,6 +253,20 @@
       </div>
     </div>
     </div>
+
+    <!-- Clear All Confirmation Dialog -->
+    <Teleport to="body">
+      <div v-if="showClearAllConfirm" class="modal-overlay" @click.self="showClearAllConfirm = false">
+        <div class="modal-dialog">
+          <h3>Clear All Labels?</h3>
+          <p>This will remove all labeled points and masks from frame {{ currentFrameNumber }}. This action cannot be undone.</p>
+          <div class="modal-actions">
+            <button @click="showClearAllConfirm = false" class="btn-cancel">Cancel</button>
+            <button @click="clearAllLabelsFromFrame" class="btn-confirm-delete">Clear All</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -291,6 +329,7 @@ const viewerHeight = ref(800);
 const bigJumpSize = ref(500); // Default value, will be loaded from server config
 const hoveredLabelId = ref<string | null>(null); // Track which label is being hovered
 const sidebarVisible = ref(true); // Sidebar visibility state
+const showClearAllConfirm = ref(false); // Clear all confirmation dialog
 const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Ref to ImageViewer component
 
 const currentImage = computed(() => {
@@ -422,6 +461,66 @@ function handleThumbnailError(event: Event): void {
   const img = event.target as HTMLImageElement;
   if (img && img.parentElement) {
     img.parentElement.style.display = 'none';
+  }
+}
+
+// Clear a specific label's points and masks from the current frame
+async function clearLabelFromFrame(labelId: string): Promise<void> {
+  try {
+    await api.delete(
+      `/projects/${projectId}/frames/${currentFrameNumber.value}/labels`,
+      { params: { label_id: labelId } }
+    );
+    // Refresh the image viewer to clear the displayed points/masks
+    if (imageViewerRef.value) {
+      await imageViewerRef.value.refreshPointsAndMasks();
+    }
+    // Update the images list
+    await refreshImagesList();
+    // Update mask status for current frame
+    await updateCurrentFrameMaskStatus();
+  } catch (error) {
+    console.error('Failed to clear label from frame:', error);
+  }
+}
+
+// Clear all labels and masks from the current frame
+async function clearAllLabelsFromFrame(): Promise<void> {
+  showClearAllConfirm.value = false;
+  try {
+    await api.delete(`/projects/${projectId}/frames/${currentFrameNumber.value}/labels`);
+    // Refresh the image viewer to clear the displayed points/masks
+    if (imageViewerRef.value) {
+      await imageViewerRef.value.refreshPointsAndMasks();
+    }
+    // Update the images list
+    await refreshImagesList();
+    // Update mask status for current frame (should be false after clear all)
+    maskStatusByFrame.value.set(currentFrameNumber.value, false);
+  } catch (error) {
+    console.error('Failed to clear all labels from frame:', error);
+  }
+}
+
+// Update the mask status for the current frame
+async function updateCurrentFrameMaskStatus(): Promise<void> {
+  try {
+    const response = await api.get(`/projects/${projectId}/frames/${currentFrameNumber.value}/masks`);
+    const hasMasks = response.data && response.data.length > 0;
+    maskStatusByFrame.value.set(currentFrameNumber.value, hasMasks);
+  } catch {
+    maskStatusByFrame.value.set(currentFrameNumber.value, false);
+  }
+}
+
+// Refresh the images list after clearing labels
+async function refreshImagesList(): Promise<void> {
+  try {
+    const { data } = await api.get<{ images: ImageData[]; total: number }>(`/projects/${projectId}/images`);
+    images.value = data.images || [];
+    totalFrames.value = data.total || 0;
+  } catch (error) {
+    console.error('Failed to refresh images:', error);
   }
 }
 
@@ -1116,19 +1215,17 @@ h1 {
 .label-option {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
   background: var(--surface-muted, #f9fafb);
   border: 2px solid var(--border, #e5e7eb);
   border-radius: 10px;
-  cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .label-option:hover {
   background: var(--surface, #ffffff);
   border-color: #2563eb;
-  transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
 }
 
@@ -1136,6 +1233,62 @@ h1 {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(124, 58, 237, 0.05));
   border-color: #2563eb;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.label-option-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  cursor: pointer;
+}
+
+.btn-clear-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+}
+
+.label-option:hover .btn-clear-label {
+  opacity: 1;
+}
+
+.btn-clear-label:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.btn-clear-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.5rem;
+  background: transparent;
+  border: 1px dashed var(--border, #e5e7eb);
+  border-radius: 8px;
+  color: var(--muted, #6b7280);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-all:hover {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: #ef4444;
+  color: #ef4444;
 }
 
 .label-color {
@@ -1409,5 +1562,89 @@ h1 {
 
 .btn-auto-label svg {
   flex-shrink: 0;
+}
+
+/* Clear All Confirmation Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.15s ease;
+}
+
+.modal-dialog {
+  background: var(--surface, #ffffff);
+  border-radius: 16px;
+  padding: 1.5rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.2s ease;
+}
+
+.modal-dialog h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  color: var(--text, #0f172a);
+}
+
+.modal-dialog p {
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  color: var(--muted, #6b7280);
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel {
+  padding: 0.6rem 1rem;
+  background: var(--surface-muted, #f3f4f6);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  color: var(--text, #374151);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel:hover {
+  background: var(--surface, #ffffff);
+  border-color: var(--border-hover, #d1d5db);
+}
+
+.btn-confirm-delete {
+  padding: 0.6rem 1rem;
+  background: #ef4444;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-confirm-delete:hover {
+  background: #dc2626;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
