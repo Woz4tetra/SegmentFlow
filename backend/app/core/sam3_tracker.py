@@ -12,6 +12,7 @@ import gc
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,14 @@ class SAM3Tracker:
         # Temporary directory for scaled frames (only used if scaling needed)
         self._temp_dir: str | None = None
         self._original_frames: dict[int, np.ndarray] = {}  # frame_idx -> original resolution frame
+
+        # Lock for thread-safe temp directory management
+        self._temp_dir_lock = threading.Lock()
+
+        # Lock for inference operations - ensures only one inference runs at a time
+        # This prevents race conditions where a new request deletes temp files
+        # while a previous request's SAM3 init_state is still loading them
+        self._inference_lock = threading.Lock()
 
         # Set up device (model loaded lazily on first use)
         self.device = torch.device(f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -239,8 +248,10 @@ class SAM3Tracker:
             f"Inference width: {self.inference_width} -> {self.scaled_width}x{self.scaled_height}"
         )
 
-        # Clean up any previous temp directory
-        self._cleanup_temp_dir()
+        # Note: We do NOT clean up temp directory here because set_images_dir() can be
+        # called outside the inference lock. Cleanup is handled safely in:
+        # 1. _prepare_frames_for_propagation() - cleans old dir after new one is created
+        # 2. End of inference methods (get_preview_mask, etc.) - cleans up after use
 
     def _cleanup_temp_dir(self) -> None:
         """Clean up temporary frame directory."""
@@ -306,72 +317,195 @@ class SAM3Tracker:
         # Reset inference state first to free GPU memory
         self._reset_inference_state()
 
-        # Clean up previous temp directory
-        self._cleanup_temp_dir()
-
         end_frame = min(start_frame + num_frames, self.total_frames)
         actual_num_frames = end_frame - start_frame
 
-        logger.info(f"Preparing {actual_num_frames} frames starting at {start_frame}...")
+        if actual_num_frames <= 0:
+            raise ValueError(
+                f"Invalid frame range: start={start_frame}, num_frames={num_frames}, total_frames={self.total_frames}"
+            )
+
+        logger.info(
+            f"Preparing {actual_num_frames} frames starting at {start_frame} (frames {start_frame} to {end_frame-1})..."
+        )
+
+        # Store old temp dir to clean up later (after new one is created)
+        old_temp_dir = self._get_and_create_temp_dir()
 
         # Check if scaling is needed
         needs_scaling = self.scaled_width != self.image_width
 
         if needs_scaling:
-            # Create temp directory for scaled frames
-            self._temp_dir = tempfile.mkdtemp(prefix="sam3_frames_")
-
-            for local_idx, frame_idx in enumerate(
-                tqdm(range(start_frame, end_frame), desc="Scaling frames")
-            ):
-                # Load original image
-                image_path = self.image_files[frame_idx]
-                frame = cv2.imread(str(image_path))
-                if frame is None:
-                    raise ValueError(f"Cannot read image: {image_path}")
-
-                # Store original resolution frame for later use
-                self._original_frames[frame_idx] = frame.copy()
-
-                # Scale down frame
-                scaled_frame = cv2.resize(
-                    frame,
-                    (self.scaled_width, self.scaled_height),
-                    interpolation=cv2.INTER_AREA,
-                )
-
-                # Save with sequential naming
-                frame_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
-                cv2.imwrite(frame_path, scaled_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-            logger.info(f"Created {actual_num_frames} scaled frames in {self._temp_dir}")
-            return self._temp_dir
-
+            frames_created = self._create_scaled_frames(start_frame, end_frame)
+            logger.info(f"Created {frames_created} scaled frames in {self._temp_dir}")
         else:
-            # No scaling needed - create temp directory with symlinks
+            frames_created = self._create_symlinked_frames(start_frame, end_frame)
+            if frames_created == 0:
+                raise ValueError(
+                    f"No frames were created. Requested {actual_num_frames} frames starting from {start_frame}, "
+                    f"but all source frames were missing or unreadable."
+                )
+            logger.info(f"Created {frames_created} frames in {self._temp_dir} (requested {actual_num_frames})")
+
+        # Clean up old temp directory after new one is successfully created
+        self._cleanup_old_temp_dir(old_temp_dir)
+
+        return self._temp_dir
+
+    def _get_and_create_temp_dir(self) -> str | None:
+        """Get current temp dir and create a new one.
+
+        Returns:
+            Path to old temp directory (if any)
+        """
+        with self._temp_dir_lock:
+            old_temp_dir = self._temp_dir
             self._temp_dir = tempfile.mkdtemp(prefix="sam3_frames_")
+        return old_temp_dir
 
-            for local_idx, frame_idx in enumerate(range(start_frame, end_frame)):
-                image_path = self.image_files[frame_idx]
+    def _cleanup_old_temp_dir(self, old_temp_dir: str | None) -> None:
+        """Clean up old temp directory if it exists and is different from current.
 
-                # Load and store original frame for later use
-                frame = cv2.imread(str(image_path))
-                if frame is None:
-                    raise ValueError(f"Cannot read image: {image_path}")
-                self._original_frames[frame_idx] = frame
+        Args:
+            old_temp_dir: Path to old temp directory to clean up
+        """
+        with self._temp_dir_lock:
+            new_temp_dir = self._temp_dir
+            if old_temp_dir and old_temp_dir != new_temp_dir and os.path.exists(old_temp_dir):
+                try:
+                    shutil.rmtree(old_temp_dir, ignore_errors=True)
+                    logger.debug(f"Cleaned up old temp directory: {old_temp_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up old temp directory {old_temp_dir}: {e}")
 
-                # SAM3 only supports JPEG format - must convert if not JPEG
-                if image_path.suffix.lower() in {".jpg", ".jpeg"}:
-                    # Create symlink with sequential naming
-                    link_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
-                    os.symlink(image_path.absolute(), link_path)
-                else:
-                    # Convert to JPEG for SAM3 compatibility
-                    frame_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
-                    cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    def _load_frame(self, frame_idx: int) -> tuple[Path, np.ndarray] | None:
+        """Load a frame from disk.
 
-            logger.info(f"Created {actual_num_frames} symlinks in {self._temp_dir}")
-            return self._temp_dir
+        Args:
+            frame_idx: Frame index to load
+
+        Returns:
+            Tuple of (image_path, frame_array) or None if frame cannot be loaded
+        """
+        if frame_idx >= len(self.image_files):
+            logger.warning(f"Frame index {frame_idx} out of range (total: {len(self.image_files)}), skipping")
+            return None
+
+        image_path = self.image_files[frame_idx]
+
+        if not image_path.exists():
+            logger.warning(f"Image file does not exist: {image_path}, skipping")
+            return None
+
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            logger.warning(f"Cannot read image: {image_path}, skipping")
+            return None
+
+        return image_path, frame
+
+    def _create_scaled_frames(self, start_frame: int, end_frame: int) -> int:
+        """Create scaled copies of frames in temp directory.
+
+        Args:
+            start_frame: Starting frame index
+            end_frame: Ending frame index (exclusive)
+
+        Returns:
+            Number of frames created
+
+        Raises:
+            ValueError: If frame cannot be read
+        """
+        frames_created = 0
+        for local_idx, frame_idx in enumerate(tqdm(range(start_frame, end_frame), desc="Scaling frames")):
+            result = self._load_frame(frame_idx)
+            if result is None:
+                raise ValueError(f"Cannot load frame {frame_idx}")
+
+            _, frame = result
+
+            # Store original resolution frame for later use
+            self._original_frames[frame_idx] = frame.copy()
+
+            # Scale down frame
+            scaled_frame = cv2.resize(
+                frame,
+                (self.scaled_width, self.scaled_height),
+                interpolation=cv2.INTER_AREA,
+            )
+
+            # Save with sequential naming
+            frame_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
+            cv2.imwrite(frame_path, scaled_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            frames_created += 1
+
+        return frames_created
+
+    def _create_symlinked_frames(self, start_frame: int, end_frame: int) -> int:
+        """Create symlinks or copies of frames in temp directory.
+
+        Args:
+            start_frame: Starting frame index
+            end_frame: Ending frame index (exclusive)
+
+        Returns:
+            Number of frames created
+        """
+        frames_created = 0
+        for frame_idx in range(start_frame, end_frame):
+            result = self._load_frame(frame_idx)
+            if result is None:
+                continue
+
+            image_path, frame = result
+
+            # Store original resolution frame for later use
+            self._original_frames[frame_idx] = frame
+
+            # Use the actual number of frames created so far as the local index
+            # This ensures sequential naming without gaps
+            local_idx = frames_created
+
+            # Create frame link or copy
+            if self._create_frame_link_or_copy(image_path, frame, local_idx):
+                frames_created += 1
+
+        return frames_created
+
+    def _create_frame_link_or_copy(self, image_path: Path, frame: np.ndarray, local_idx: int) -> bool:
+        """Create a symlink or copy of a frame in the temp directory.
+
+        Args:
+            image_path: Path to source image
+            frame: Loaded frame array
+            local_idx: Local index for sequential naming
+
+        Returns:
+            True if frame was created successfully, False otherwise
+        """
+        target_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
+
+        # SAM3 only supports JPEG format - must convert if not JPEG
+        if image_path.suffix.lower() in {".jpg", ".jpeg"}:
+            # Try to create symlink first
+            try:
+                source_path = image_path.resolve()
+                if not source_path.exists():
+                    logger.warning(f"Source image does not exist: {source_path}, skipping")
+                    return False
+                os.symlink(str(source_path), target_path)
+                logger.debug(f"Created symlink: {target_path} -> {source_path}")
+                return True
+            except (OSError, ValueError) as e:
+                # If symlink fails, copy the file instead
+                logger.warning(f"Symlink failed for {image_path}, copying instead: {e}")
+                cv2.imwrite(target_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                return True
+        else:
+            # Convert to JPEG for SAM3 compatibility
+            cv2.imwrite(target_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            return True
 
     def _init_inference_state(self, frames_dir: str) -> None:
         """Initialize SAM3 inference state with extracted frames directory.
@@ -503,66 +637,68 @@ class SAM3Tracker:
         if self.images_dir is None:
             raise RuntimeError("No images directory set. Call set_images_dir() first.")
 
-        # Clamp propagate_length to not exceed available frames
-        max_frames = min(propagate_length, self.total_frames - source_frame)
+        # Use inference lock to prevent race conditions
+        with self._inference_lock:
+            # Clamp propagate_length to not exceed available frames
+            max_frames = min(propagate_length, self.total_frames - source_frame)
 
-        # Prepare frames in temp directory
-        frames_dir = self._prepare_frames_for_propagation(source_frame, max_frames)
+            # Prepare frames in temp directory
+            frames_dir = self._prepare_frames_for_propagation(source_frame, max_frames)
 
-        # Initialize inference state with prepared frames
-        self._init_inference_state(frames_dir)
+            # Initialize inference state with prepared frames
+            self._init_inference_state(frames_dir)
 
-        # Add points for each object (at local frame index 0)
-        local_source_idx = 0  # Source frame is always at index 0 in temp directory
-        for obj_id, (points, labels) in points_by_obj.items():
-            if len(points) > 0:
-                self.add_points(
-                    local_frame_idx=local_source_idx,
-                    obj_id=obj_id,
-                    points=points,
-                    labels=labels,
-                    clear_old=True,
-                )
+            # Add points for each object (at local frame index 0)
+            local_source_idx = 0  # Source frame is always at index 0 in temp directory
+            for obj_id, (points, labels) in points_by_obj.items():
+                if len(points) > 0:
+                    self.add_points(
+                        local_frame_idx=local_source_idx,
+                        obj_id=obj_id,
+                        points=points,
+                        labels=labels,
+                        clear_old=True,
+                    )
 
-        # Propagate through frames (ensure correct GPU context)
-        video_segments: dict[int, dict[int, np.ndarray]] = {}
+            # Propagate through frames (ensure correct GPU context)
+            video_segments: dict[int, dict[int, np.ndarray]] = {}
 
-        with torch.cuda.device(self.gpu_id):
-            for (
-                local_frame_idx,
-                obj_ids,
-                _low_res_masks,
-                video_res_masks,
-                _obj_scores,
-            ) in self.predictor.propagate_in_video(
-                self.inference_state,
-                start_frame_idx=0,
-                max_frame_num_to_track=max_frames,
-                reverse=False,
-                propagate_preflight=True,
-            ):
-                # Convert local frame index back to original video frame index
-                original_frame_idx = source_frame + local_frame_idx
+            with torch.cuda.device(self.gpu_id):
+                for (
+                    local_frame_idx,
+                    obj_ids,
+                    _low_res_masks,
+                    video_res_masks,
+                    _obj_scores,
+                ) in self.predictor.propagate_in_video(
+                    self.inference_state,
+                    start_frame_idx=0,
+                    max_frame_num_to_track=max_frames,
+                    reverse=False,
+                    propagate_preflight=True,
+                ):
+                    # Convert local frame index back to original video frame index
+                    original_frame_idx = source_frame + local_frame_idx
 
-                # Scale masks to original resolution
-                video_segments[original_frame_idx] = {}
-                for i, out_obj_id in enumerate(obj_ids):
-                    mask = (video_res_masks[i] > 0.0).cpu().numpy()
-                    scaled_mask = self._scale_mask_to_original(mask)
-                    video_segments[original_frame_idx][out_obj_id] = scaled_mask
+                    # Scale masks to original resolution
+                    video_segments[original_frame_idx] = {}
+                    for i, out_obj_id in enumerate(obj_ids):
+                        mask = (video_res_masks[i] > 0.0).cpu().numpy()
+                        scaled_mask = self._scale_mask_to_original(mask)
+                        video_segments[original_frame_idx][out_obj_id] = scaled_mask
 
-                if callback:
-                    progress = (local_frame_idx + 1) / max_frames
-                    callback(original_frame_idx, progress)
+                    if callback:
+                        progress = (local_frame_idx + 1) / max_frames
+                        callback(original_frame_idx, progress)
 
-        # Copy original frames before cleanup
-        original_frames = dict(self._original_frames)
+            # Copy original frames before cleanup
+            original_frames = dict(self._original_frames)
 
-        # Clean up to free GPU memory and disk space
-        self._reset_inference_state()
-        self._cleanup_temp_dir()
+            # Clean up to free GPU memory and disk space
+            self._reset_inference_state()
+            self._cleanup_temp_dir()
 
-        return video_segments, original_frames
+            return video_segments, original_frames
 
     def get_preview_mask(
         self,
@@ -597,32 +733,56 @@ class SAM3Tracker:
             if self.model is None or self.predictor is None:
                 raise RuntimeError("Failed to load SAM3 model")
 
-        if self.images_dir is None:
-            raise RuntimeError("No images directory set. Call set_images_dir() first.")
+        # Use inference lock to prevent race conditions where a new request
+        # deletes temp files while a previous request's SAM3 init_state is still loading
+        with self._inference_lock:
+            # For single-frame inference, prepare ONLY the target frame
+            # We'll create 3 copies of the same frame to satisfy SAM3's init_state requirements
+            # This ensures we always have exactly 3 frames (no gaps) and only use frame 1
+            start = frame_idx
+            num_frames = 1  # Only prepare the target frame
+            local_idx = 0  # Target frame will be at index 0
 
-        # Prepare just a few frames around the target (SAM3 needs some context)
-        # We'll use 3 frames: target-1, target, target+1
-        start = max(0, frame_idx - 1)
-        num_frames = min(3, self.total_frames - start)
-        local_idx = frame_idx - start
+            logger.debug(f"Preparing single frame {frame_idx} for preview (will duplicate to satisfy SAM3)")
+            frames_dir = self._prepare_frames_for_propagation(start, num_frames)
 
-        frames_dir = self._prepare_frames_for_propagation(start, num_frames)
-        self._init_inference_state(frames_dir)
+            # SAM3's init_state expects at least 3 frames, so duplicate the single frame
+            # This ensures we have exactly 000000.jpg, 000001.jpg, 000002.jpg
+            if os.path.exists(os.path.join(frames_dir, "000000.jpg")):
+                source_frame = os.path.join(frames_dir, "000000.jpg")
+                # Create two more copies
+                for i in [1, 2]:
+                    dest_frame = os.path.join(frames_dir, f"{i:06d}.jpg")
+                    if not os.path.exists(dest_frame):
+                        try:
+                            # Try symlink first
+                            os.symlink(os.path.abspath(source_frame), dest_frame)
+                        except OSError:
+                            # If symlink fails, copy the file
+                            shutil.copy2(source_frame, dest_frame)
+                logger.debug("Duplicated frame to create 3 frames for SAM3 init_state")
+            else:
+                raise FileNotFoundError(f"Expected frame 000000.jpg not found in {frames_dir}")
 
-        # Add points and get mask
-        mask = self.add_points(
-            local_frame_idx=local_idx,
-            obj_id=obj_id,
-            points=points,
-            labels=labels,
-            clear_old=True,
-        )
+            # Update local_idx to use frame 1 (middle frame) for inference
+            local_idx = 1
 
-        # Clean up to free GPU memory
-        self._reset_inference_state()
-        self._cleanup_temp_dir()
+            self._init_inference_state(frames_dir)
 
-        return mask
+            # Add points and get mask
+            mask = self.add_points(
+                local_frame_idx=local_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+                clear_old=True,
+            )
+
+            # Clean up to free GPU memory
+            self._reset_inference_state()
+            self._cleanup_temp_dir()
+
+            return mask
 
     def get_multi_object_preview(
         self,
@@ -641,32 +801,34 @@ class SAM3Tracker:
         if self.images_dir is None:
             raise RuntimeError("No images directory set. Call set_images_dir() first.")
 
-        # Prepare just a few frames around the target
-        start = max(0, frame_idx - 1)
-        num_frames = min(3, self.total_frames - start)
-        local_idx = frame_idx - start
+        # Use inference lock to prevent race conditions
+        with self._inference_lock:
+            # Prepare just a few frames around the target
+            start = max(0, frame_idx - 1)
+            num_frames = min(3, self.total_frames - start)
+            local_idx = frame_idx - start
 
-        frames_dir = self._prepare_frames_for_propagation(start, num_frames)
-        self._init_inference_state(frames_dir)
+            frames_dir = self._prepare_frames_for_propagation(start, num_frames)
+            self._init_inference_state(frames_dir)
 
-        masks = {}
-        for obj_id, (points, labels) in points_by_obj.items():
-            if len(points) > 0:
-                mask = self.add_points(
-                    local_frame_idx=local_idx,
-                    obj_id=obj_id,
-                    points=points,
-                    labels=labels,
-                    clear_old=True,
-                )
-                if mask is not None:
-                    masks[obj_id] = mask
+            masks = {}
+            for obj_id, (points, labels) in points_by_obj.items():
+                if len(points) > 0:
+                    mask = self.add_points(
+                        local_frame_idx=local_idx,
+                        obj_id=obj_id,
+                        points=points,
+                        labels=labels,
+                        clear_old=True,
+                    )
+                    if mask is not None:
+                        masks[obj_id] = mask
 
-        # Clean up to free GPU memory
-        self._reset_inference_state()
-        self._cleanup_temp_dir()
+            # Clean up to free GPU memory
+            self._reset_inference_state()
+            self._cleanup_temp_dir()
 
-        return masks
+            return masks
 
     def get_single_frame_mask(
         self,

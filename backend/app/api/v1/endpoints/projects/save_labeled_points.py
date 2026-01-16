@@ -112,8 +112,8 @@ async def _run_sam_inference_and_save_mask(
         mask = await loop.run_in_executor(
             None,
             tracker.get_single_frame_mask,
-            0,  # Frame index (always 0 since we only have 1 image in inference dir)
-            hash(str(label_id)),  # Use hash of label_id as obj_id
+            frame_number,  # Use actual frame number from the inference directory
+            hash(str(label_id)) % (2**31),  # Use positive hash as obj_id (SAM expects int32)
             points_array,
             labels_array,
         )
@@ -134,23 +134,25 @@ async def _run_sam_inference_and_save_mask(
         mask_uint8 = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask.astype(np.uint8)
         mask_uint8 = np.ascontiguousarray(mask_uint8)
         
-        # Find contours using OpenCV (much faster than nested loops)
-        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        # Find contours using OpenCV with CHAIN_APPROX_SIMPLE to reduce point count
+        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Flatten all contour points into a single list
-        contour_pixels = []
-        for contour in contours:
-            # Each contour is a numpy array of shape (n, 1, 2)
-            # Reshape to (n, 2) and convert to list of [x, y] pairs
-            points = contour.reshape(-1, 2).tolist()
-            contour_pixels.extend(points)
-        
-        if not contour_pixels:
+        if not contours:
             logger.warning(f"SAM mask has no contours for frame {frame_number}")
             return False
         
-        # Calculate area
-        area = len(contour_pixels)
+        # Take only the largest contour (avoid multiple disconnected regions)
+        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Reshape contour from (n, 1, 2) to list of [x, y] pairs
+        contour_pixels = largest_contour.reshape(-1, 2).tolist()
+        
+        if len(contour_pixels) < 3:
+            logger.warning(f"SAM mask contour too small for frame {frame_number}")
+            return False
+        
+        # Calculate actual mask area
+        area = float(cv2.contourArea(largest_contour))
         
         # Check if mask already exists for this label
         existing_mask_result = await db.execute(
@@ -312,3 +314,4 @@ async def save_labeled_points(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save labeled points: {e!s}",
         ) from e
+

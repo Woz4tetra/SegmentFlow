@@ -23,11 +23,16 @@
         <p class="placeholder-subtext">Images will appear here when available</p>
       </div>
     </div>
+
+    <!-- Mode indicator -->
+    <div v-if="imageLoaded" class="mode-indicator" :class="{ exclude: !includeMode }">
+      {{ includeMode ? '+ Include' : '− Exclude' }}
+    </div>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, watch, onBeforeUnmount, nextTick } from 'vue';
+import { ref, onMounted, watch, onBeforeUnmount, nextTick, computed } from 'vue';
 import { fabric } from 'fabric';
 import axios from 'axios';
 
@@ -35,6 +40,7 @@ interface Label {
   id: string;
   name: string;
   color_hex: string;
+  thumbnail_path: string | null;
 }
 
 interface Props {
@@ -45,7 +51,7 @@ interface Props {
   frameNumber?: number;
   selectedLabelId?: string;
   selectedLabelColor?: string;
-  labels?: Label[];
+  labels: Label[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -58,21 +64,30 @@ const props = withDefaults(defineProps<Props>(), {
   labels: () => [],
 });
 
+// Point stored per label
 interface Point {
   x: number;
   y: number;
-  include: boolean; // true = include (1), false = exclude (0)
+  include: boolean;
   id: string;
+  labelId: string;
+}
+
+// Mask contour stored per label
+interface MaskContour {
+  labelId: string;
+  contourPolygon: number[][];
+  area: number;
 }
 
 const containerRef = ref<HTMLElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let fabricCanvas: fabric.Canvas | null = null;
-let fabricImg: fabric.Image | null = null; // Store reference to the image object
+let fabricImg: fabric.Image | null = null;
 
 const imageLoaded = ref(false);
 
-// API client for saving points and masks
+// API client
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
   timeout: 20000,
@@ -80,32 +95,47 @@ const api = axios.create({
 
 // Pan and zoom state
 const scale = ref(1);
-const position = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const lastPointerPosition = ref({ x: 0, y: 0 });
 
-// Store window event listeners for cleanup
-let windowMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
-let windowMouseUpHandler: ((e: MouseEvent) => void) | null = null;
-let resizeObserver: ResizeObserver | null = null;
-let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+// Point mode (include/exclude)
+const includeMode = ref(true);
+
+// Store points and masks PER LABEL - this is the key fix
+const pointsByLabel = ref<Map<string, Point[]>>(new Map());
+const masksByLabel = ref<Map<string, MaskContour>>(new Map());
+
+// Fabric objects for rendering - keyed by point ID or label ID
+const pointVisuals = ref<Map<string, { circle: fabric.Circle; icon: fabric.Text }>>(new Map());
+const maskVisuals = ref<Map<string, fabric.Object>>(new Map());
+
+// Prevent concurrent loads
+const isLoadingData = ref(false);
 
 // Image dimensions
 const imageWidth = ref(0);
 const imageHeight = ref(0);
 
-// Point clicking state (CANVAS-003)
-const includeMode = ref(true); // true = include (I key), false = exclude (U key)
-const points = ref<Point[]>([]); // Store clicked points
-const pointCircles = ref<Map<string, fabric.Circle>>(new Map()); // Store point circle objects for updates
-const pointIcons = ref<Map<string, fabric.Text>>(new Map()); // Store point icon objects (plus/minus) for updates
-const maskPolygons = ref<Map<string, fabric.Polygon>>(new Map()); // Store rendered mask polygons from database
-const maskContours = ref<Map<string, { contour: number[][], color: string }>>(new Map()); // Store original contour data for position updates
-
-// WebSocket connection (for status updates only)
+// WebSocket connection
 let websocket: WebSocket | null = null;
 const wsConnected = ref(false);
 
+// Cleanup references
+let resizeObserver: ResizeObserver | null = null;
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+// Store event handler references for cleanup
+let containerMouseDownHandler: ((e: MouseEvent) => void) | null = null;
+let containerContextMenuHandler: ((e: Event) => void) | null = null;
+let containerWheelHandler: ((e: WheelEvent) => void) | null = null;
+
+// Get color for a label by ID
+function getLabelColor(labelId: string): string {
+  const label = props.labels.find(l => l.id === labelId);
+  return label?.color_hex || '#2563eb';
+}
+
+// Load the image
 function loadImage(url: string): void {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -115,24 +145,11 @@ function loadImage(url: string): void {
     imageHeight.value = img.height;
     imageLoaded.value = true;
     
-    // Initialize canvas on next tick to ensure DOM is ready
     await nextTick();
     if (canvasRef.value) {
-      // Dispose old canvas if it exists
-      if (fabricCanvas) {
-        try {
-          fabricCanvas.dispose();
-        } catch (e) {
-          console.warn('Error disposing canvas:', e);
-        }
-        fabricCanvas = null;
-        fabricImg = null;
-      }
       initializeFabricCanvas(img);
-      
-      // Load existing points and masks after canvas is initialized
       await nextTick();
-      await loadExistingData();
+      await loadAllExistingData();
     }
   };
   
@@ -146,32 +163,31 @@ function loadImage(url: string): void {
 function initializeFabricCanvas(img: HTMLImageElement): void {
   if (!canvasRef.value || !containerRef.value) return;
   
-  // Dispose old canvas if it exists
+  // Dispose old canvas
   if (fabricCanvas) {
     fabricCanvas.dispose();
     fabricImg = null;
+    pointVisuals.value.clear();
+    maskVisuals.value.clear();
   }
   
-  // Get actual container dimensions
   const containerRect = containerRef.value.getBoundingClientRect();
   const canvasWidth = containerRect.width || props.width;
   const canvasHeight = containerRect.height || props.height;
   
-  // Create fabric canvas
   fabricCanvas = new fabric.Canvas(canvasRef.value, {
     width: canvasWidth,
     height: canvasHeight,
     backgroundColor: '#1a1a1a',
-    selection: false, // Disable selection
+    selection: false,
     preserveObjectStacking: true,
   });
   
-  // Create fabric image from HTMLImageElement
   fabricImg = new fabric.Image(img, {
     left: 0,
     top: 0,
-    selectable: false, // Disable selection handles
-    evented: false, // Disable interaction with the image itself
+    selectable: false,
+    evented: false,
     hoverCursor: 'default',
     moveCursor: 'default',
   });
@@ -179,40 +195,30 @@ function initializeFabricCanvas(img: HTMLImageElement): void {
   fabricCanvas.add(fabricImg);
   fabricCanvas.renderAll();
   
-  // Center the image initially
   resetView();
-  
-  // Set up event handlers
   setupEventHandlers();
-  
-  // Set up resize observer
   setupResizeObserver();
 }
 
 function resetView(): void {
   if (!fabricCanvas || !fabricImg) return;
   
-  // Ensure no objects are selected
   fabricCanvas.discardActiveObject();
   
-  // Get actual canvas dimensions
   const canvasWidth = fabricCanvas.getWidth();
   const canvasHeight = fabricCanvas.getHeight();
   
-  // Calculate scale to fit image in viewport
   const scaleX = canvasWidth / imageWidth.value;
   const scaleY = canvasHeight / imageHeight.value;
-  const fitScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%
+  const fitScale = Math.min(scaleX, scaleY, 1);
   
   scale.value = fitScale;
   
-  // Set the image scale
   fabricImg.set({
     scaleX: fitScale,
     scaleY: fitScale,
   });
   
-  // Center the image
   const scaledWidth = imageWidth.value * fitScale;
   const scaledHeight = imageHeight.value * fitScale;
   const centerX = (canvasWidth - scaledWidth) / 2;
@@ -223,265 +229,149 @@ function resetView(): void {
     top: centerY,
   });
   
-  // Update point positions
-  updatePointPositions();
-  
-  // Update mask polygon positions
-  updateMaskPolygonPositions();
-  
+  updateAllVisualPositions();
   fabricCanvas.renderAll();
 }
 
-function setupEventHandlers(): void {
-  if (!fabricCanvas) return;
-  
-  // Disable all default Fabric.js interactions
-  fabricCanvas.on('selection:created', (e: any) => {
-    e.e?.stopPropagation();
-    fabricCanvas?.discardActiveObject();
-  });
-  fabricCanvas.on('selection:updated', (e: any) => {
-    e.e?.stopPropagation();
-    fabricCanvas?.discardActiveObject();
-  });
-  
+function cleanupEventHandlers(): void {
   const container = containerRef.value;
   if (!container) return;
   
-  // Prevent context menu on container
-  container.addEventListener('contextmenu', (e) => {
+  // Remove old handlers if they exist
+  if (containerMouseDownHandler) {
+    container.removeEventListener('mousedown', containerMouseDownHandler);
+    containerMouseDownHandler = null;
+  }
+  if (containerContextMenuHandler) {
+    container.removeEventListener('contextmenu', containerContextMenuHandler);
+    containerContextMenuHandler = null;
+  }
+  if (containerWheelHandler) {
+    container.removeEventListener('wheel', containerWheelHandler);
+    containerWheelHandler = null;
+  }
+}
+
+function setupEventHandlers(): void {
+  if (!fabricCanvas || !containerRef.value) return;
+  
+  const container = containerRef.value;
+  
+  // Clean up any existing handlers first to prevent duplicates
+  cleanupEventHandlers();
+  
+  // Disable Fabric.js selection
+  fabricCanvas.on('selection:created', () => {
+    fabricCanvas?.discardActiveObject();
+  });
+  fabricCanvas.on('selection:updated', () => {
+    fabricCanvas?.discardActiveObject();
+  });
+  
+  // Create and store mousedown handler
+  containerMouseDownHandler = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    return false;
-  });
-  
-  // Attach mousedown to container
-  // Note: Attach to container only to avoid duplicate handlers from bubbling
-  container.addEventListener('mousedown', (e) => {
+    
     if (e.button === 2) {
-      // Right click - prevent context menu and handle panning
-      e.preventDefault();
-      e.stopPropagation();
-      handleMouseDown(e);
+      // Right click - start panning
+      startPan(e);
     } else if (e.button === 0) {
-      // Left click - add point for SAM inference
-      e.preventDefault();
-      e.stopPropagation();
-      handleLeftClick(e);
+      // Left click - add point
+      handleClick(e);
     }
-  });
-  
-  // Set initial cursor
-  container.style.cursor = includeMode.value ? 'crosshair' : 'not-allowed';
-  
-  // Attach wheel to container
-  container.addEventListener('wheel', handleWheel, { passive: false });
-}
-
-function setupResizeObserver(): void {
-  if (!containerRef.value || !ResizeObserver) return;
-  
-  // Clean up existing observer
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-  }
-  
-  // Clear any pending resize timeout
-  if (resizeTimeout) {
-    clearTimeout(resizeTimeout);
-    resizeTimeout = null;
-  }
-  
-  // Create new resize observer
-  resizeObserver = new ResizeObserver((entries) => {
-    if (!fabricCanvas || !fabricImg) return;
-    
-    // Clear any pending resize
-    if (resizeTimeout) {
-      clearTimeout(resizeTimeout);
-    }
-    
-    // Debounce the resize to avoid excessive updates
-    resizeTimeout = setTimeout(() => {
-      if (!fabricCanvas || !fabricImg) return;
-      
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        
-        if (width > 0 && height > 0) {
-          // Use nextTick to ensure DOM has updated
-          nextTick(() => {
-            if (!fabricCanvas || !fabricImg) return;
-            
-            // Get actual container dimensions to ensure accuracy
-            const containerRect = containerRef.value?.getBoundingClientRect();
-            const actualWidth = containerRect?.width || width;
-            const actualHeight = containerRect?.height || height;
-            
-            // Update canvas dimensions
-            fabricCanvas.setDimensions({
-              width: actualWidth,
-              height: actualHeight,
-            });
-            
-            // Recalculate image fit to new dimensions
-            const scaleX = actualWidth / imageWidth.value;
-            const scaleY = actualHeight / imageHeight.value;
-            const fitScale = Math.min(scaleX, scaleY, 1);
-            
-            scale.value = fitScale;
-            
-            // Update image scale
-            fabricImg.set({
-              scaleX: fitScale,
-              scaleY: fitScale,
-            });
-            
-            // Re-center the image
-            const scaledWidth = imageWidth.value * fitScale;
-            const scaledHeight = imageHeight.value * fitScale;
-            const centerX = (actualWidth - scaledWidth) / 2;
-            const centerY = (actualHeight - scaledHeight) / 2;
-            
-            fabricImg.set({
-              left: centerX,
-              top: centerY,
-            });
-            
-            // Update point positions to match new canvas dimensions
-            updatePointPositions();
-            
-            // Update mask polygon positions
-            updateMaskPolygonPositions();
-            
-            fabricCanvas.renderAll();
-          });
-        }
-      }
-    }, 50); // Small debounce delay
-  });
-  
-  resizeObserver.observe(containerRef.value);
-}
-
-function handleMouseDown(e: MouseEvent): void {
-  isDragging.value = true;
-  lastPointerPosition.value = {
-    x: e.clientX,
-    y: e.clientY,
   };
   
-  // Change cursor
+  // Create and store contextmenu handler
+  containerContextMenuHandler = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  
+  // Store wheel handler reference
+  containerWheelHandler = handleWheel;
+  
+  // Add event listeners
+  container.addEventListener('mousedown', containerMouseDownHandler);
+  container.addEventListener('contextmenu', containerContextMenuHandler);
+  container.addEventListener('wheel', containerWheelHandler, { passive: false });
+}
+
+function startPan(e: MouseEvent): void {
+  isDragging.value = true;
+  lastPointerPosition.value = { x: e.clientX, y: e.clientY };
+  
   if (containerRef.value) {
     containerRef.value.style.cursor = 'grabbing';
   }
   
-  // Attach window-level event listeners for dragging
-  windowMouseMoveHandler = handleMouseMove;
-  windowMouseUpHandler = handleMouseUp;
-  window.addEventListener('mousemove', windowMouseMoveHandler, { passive: false });
-  window.addEventListener('mouseup', windowMouseUpHandler, { passive: false });
-}
-
-function handleMouseMove(e: MouseEvent): void {
-  if (!isDragging.value || !fabricCanvas || !fabricImg) {
-    return;
-  }
-  
-  e.preventDefault();
-  e.stopPropagation();
-  
-  const dx = e.clientX - lastPointerPosition.value.x;
-  const dy = e.clientY - lastPointerPosition.value.y;
-  
-  // Only pan if there's actual movement
-  if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
-    return;
-  }
-  
-  // Move the image object directly
-  const currentLeft = fabricImg.left || 0;
-  const currentTop = fabricImg.top || 0;
-  
-  fabricImg.set({
-    left: currentLeft + dx,
-    top: currentTop + dy,
-  });
-  
-  // Update point positions
-  updatePointPositions();
-  
-  // Update mask polygon positions
-  updateMaskPolygonPositions();
-  
-  fabricCanvas.renderAll();
-  
-  lastPointerPosition.value = {
-    x: e.clientX,
-    y: e.clientY,
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging.value || !fabricCanvas || !fabricImg) return;
+    
+    e.preventDefault();
+    
+    const dx = e.clientX - lastPointerPosition.value.x;
+    const dy = e.clientY - lastPointerPosition.value.y;
+    
+    if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) return;
+    
+    const currentLeft = fabricImg.left || 0;
+    const currentTop = fabricImg.top || 0;
+    
+    fabricImg.set({
+      left: currentLeft + dx,
+      top: currentTop + dy,
+    });
+    
+    updateAllVisualPositions();
+    fabricCanvas.renderAll();
+    
+    lastPointerPosition.value = { x: e.clientX, y: e.clientY };
   };
-}
-
-function handleMouseUp(e: MouseEvent): void {
-  // Stop dragging on any mouse button release if we're currently dragging
-  if (isDragging.value) {
+  
+  const handleMouseUp = () => {
     isDragging.value = false;
-    
-    // Reset cursor
     if (containerRef.value) {
-      containerRef.value.style.cursor = 'default';
+      containerRef.value.style.cursor = 'crosshair';
     }
-    
-    // Remove window-level event listeners
-    if (windowMouseMoveHandler) {
-      window.removeEventListener('mousemove', windowMouseMoveHandler);
-      windowMouseMoveHandler = null;
-    }
-    if (windowMouseUpHandler) {
-      window.removeEventListener('mouseup', windowMouseUpHandler);
-      windowMouseUpHandler = null;
-    }
-  }
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+  };
+  
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', handleMouseUp);
 }
 
 function handleWheel(e: WheelEvent): void {
-  if (!fabricCanvas || !fabricImg) return;
+  if (!fabricCanvas || !fabricImg || !containerRef.value) return;
   
   e.preventDefault();
   
   const oldScale = scale.value;
-  const rect = containerRef.value!.getBoundingClientRect();
+  const rect = containerRef.value.getBoundingClientRect();
   const pointer = {
     x: e.clientX - rect.left,
     y: e.clientY - rect.top,
   };
   
-  // Zoom factor
   const scaleBy = 1.05;
   const direction = e.deltaY > 0 ? -1 : 1;
   
-  // Calculate new scale
   let newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
-  
-  // Limit zoom range
   newScale = Math.max(0.1, Math.min(newScale, 10));
   
-  // Get current image position and scale
   const imgLeft = fabricImg.left || 0;
   const imgTop = fabricImg.top || 0;
   const imgScaleX = fabricImg.scaleX || 1;
   
-  // Calculate the point in image coordinates (before zoom)
   const imgX = (pointer.x - imgLeft) / imgScaleX;
   const imgY = (pointer.y - imgTop) / imgScaleX;
   
-  // Apply new scale
   fabricImg.set({
     scaleX: newScale,
     scaleY: newScale,
   });
   
-  // Adjust position to zoom towards the mouse pointer
   const newLeft = pointer.x - imgX * newScale;
   const newTop = pointer.y - imgY * newScale;
   
@@ -490,76 +380,95 @@ function handleWheel(e: WheelEvent): void {
     top: newTop,
   });
   
-  // Update point positions
-  updatePointPositions();
-  
-  // Update mask polygon positions
-  updateMaskPolygonPositions();
-  
+  updateAllVisualPositions();
   fabricCanvas.renderAll();
   
   scale.value = newScale;
 }
 
-function handleLeftClick(e: MouseEvent): void {
+function handleClick(e: MouseEvent): void {
   if (!fabricCanvas || !fabricImg || !props.projectId || !props.selectedLabelId) {
-    console.warn('Cannot add point: missing required data');
+    console.warn('Cannot add point: missing required data', {
+      hasCanvas: !!fabricCanvas,
+      hasImg: !!fabricImg,
+      projectId: props.projectId,
+      selectedLabelId: props.selectedLabelId,
+    });
     return;
   }
-
-  // Get click position relative to canvas
-  const rect = containerRef.value!.getBoundingClientRect();
+  
+  if (!containerRef.value) return;
+  
+  const rect = containerRef.value.getBoundingClientRect();
   const canvasX = e.clientX - rect.left;
   const canvasY = e.clientY - rect.top;
-
-  // Convert canvas coordinates to image coordinates
+  
   const imgLeft = fabricImg.left || 0;
   const imgTop = fabricImg.top || 0;
   const imgScaleX = fabricImg.scaleX || 1;
-
+  
   const imgX = (canvasX - imgLeft) / imgScaleX;
   const imgY = (canvasY - imgTop) / imgScaleX;
-
-  // Normalize to [0, 1] range for SAM
+  
+  // Normalize coordinates
   const normalizedX = imgX / imageWidth.value;
   const normalizedY = imgY / imageHeight.value;
-
-  // Validate coordinates are within image bounds
+  
+  // Check bounds
   if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
     console.warn('Click outside image bounds');
     return;
   }
-
-  // Add point
+  
+  // Create point for the CURRENT label
   const point: Point = {
     x: normalizedX,
     y: normalizedY,
     include: includeMode.value,
-    id: `${Date.now()}-${Math.random()}`,
+    id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    labelId: props.selectedLabelId,
   };
-
-  points.value.push(point);
-  console.log('Added point:', point);
-
-  // Save points to database
-  savePoints();
-
-  // Queue SAM inference request (SAM-003: async processing)
-  requestSAMInference();
+  
+  // Add to the label's point list
+  if (!pointsByLabel.value.has(props.selectedLabelId)) {
+    pointsByLabel.value.set(props.selectedLabelId, []);
+  }
+  pointsByLabel.value.get(props.selectedLabelId)!.push(point);
+  
+  console.log('Added point:', point, 'Total points for label:', pointsByLabel.value.get(props.selectedLabelId)?.length);
+  
+  // Render the point visually
+  renderPoint(point);
+  
+  // Save points for this label to backend
+  savePointsForLabel(props.selectedLabelId);
+  
+  // Request SAM inference via WebSocket for quick preview
+  requestSAMInference(props.selectedLabelId);
 }
 
-function renderPoint(point: Point, canvasX: number, canvasY: number): void {
+function renderPoint(point: Point): void {
   if (!fabricCanvas) return;
-
-  // Use same color for both include and exclude (label color)
-  const color = props.selectedLabelColor;
+  
+  // Remove existing visual for this point if it exists
+  const existingVisual = pointVisuals.value.get(point.id);
+  if (existingVisual) {
+    fabricCanvas.remove(existingVisual.circle);
+    fabricCanvas.remove(existingVisual.icon);
+    pointVisuals.value.delete(point.id);
+  }
+  
+  const color = getLabelColor(point.labelId);
   const radius = 6;
   const iconSize = 10;
-
-  // Create circle for the point
+  
+  // Calculate canvas position
+  const canvasPos = normalizedToCanvas(point.x, point.y);
+  
+  // Create circle
   const circle = new fabric.Circle({
-    left: canvasX - radius,
-    top: canvasY - radius,
+    left: canvasPos.x - radius,
+    top: canvasPos.y - radius,
     radius: radius,
     fill: color,
     stroke: '#ffffff',
@@ -573,12 +482,10 @@ function renderPoint(point: Point, canvasX: number, canvasY: number): void {
       offsetY: 2,
     }),
   });
-
-  // Create icon (plus for include, minus for exclude)
+  
+  // Create icon (+/-)
   const iconText = point.include ? '+' : '−';
   const icon = new fabric.Text(iconText, {
-    left: 0,
-    top: 0,
     fontSize: iconSize,
     fill: '#ffffff',
     fontFamily: 'Arial, sans-serif',
@@ -588,8 +495,6 @@ function renderPoint(point: Point, canvasX: number, canvasY: number): void {
     originY: 'center',
     selectable: false,
     evented: false,
-    charSpacing: 0,
-    lineHeight: 1,
     shadow: new fabric.Shadow({
       color: 'rgba(0, 0, 0, 0.5)',
       blur: 2,
@@ -597,147 +502,462 @@ function renderPoint(point: Point, canvasX: number, canvasY: number): void {
       offsetY: 1,
     }),
   });
-
+  
   fabricCanvas.add(circle);
   fabricCanvas.add(icon);
   
-  // Use setPositionByOrigin to perfectly center the icon at the desired point
-  // This accounts for font metrics and ensures true visual centering
-  icon.setPositionByOrigin(new fabric.Point(canvasX, canvasY), 'center', 'center');
+  icon.setPositionByOrigin(new fabric.Point(canvasPos.x, canvasPos.y), 'center', 'center');
   icon.setCoords();
-  fabricCanvas?.bringToFront(circle);
-  fabricCanvas?.bringToFront(icon);
   
-  // Store references for updates
-  pointCircles.value.set(point.id, circle);
-  pointIcons.value.set(point.id, icon);
+  fabricCanvas.bringToFront(circle);
+  fabricCanvas.bringToFront(icon);
+  
+  // Store visual references
+  pointVisuals.value.set(point.id, { circle, icon });
   
   fabricCanvas.renderAll();
 }
 
-function updatePointPositions(): void {
-  if (!fabricCanvas || !fabricImg) return;
+function normalizedToCanvas(normX: number, normY: number): { x: number; y: number } {
+  if (!fabricImg) return { x: 0, y: 0 };
   
   const imgLeft = fabricImg.left || 0;
   const imgTop = fabricImg.top || 0;
   const imgScaleX = fabricImg.scaleX || 1;
+  
+  return {
+    x: imgLeft + normX * imageWidth.value * imgScaleX,
+    y: imgTop + normY * imageHeight.value * imgScaleX,
+  };
+}
+
+function updateAllVisualPositions(): void {
+  if (!fabricCanvas || !fabricImg) return;
+  
   const radius = 6;
   
-  // Update each point circle and icon position based on current image transform
-  points.value.forEach((point) => {
-    const circle = pointCircles.value.get(point.id);
-    const icon = pointIcons.value.get(point.id);
-    if (!circle) return;
-    
-    // Convert normalized coordinates to canvas coordinates
-    const canvasX = imgLeft + point.x * imageWidth.value * imgScaleX;
-    const canvasY = imgTop + point.y * imageHeight.value * imgScaleX;
-    
-    circle.set({
-      left: canvasX - radius,
-      top: canvasY - radius,
-    });
-    
-    if (icon) {
-      // Ensure icon stays centered on the point using setPositionByOrigin for accurate centering
-      icon.setPositionByOrigin(new fabric.Point(canvasX, canvasY), 'center', 'center');
-      icon.setCoords();
+  // Update all point positions
+  for (const [labelId, points] of pointsByLabel.value) {
+    for (const point of points) {
+      const visual = pointVisuals.value.get(point.id);
+      if (!visual) continue;
+      
+      const canvasPos = normalizedToCanvas(point.x, point.y);
+      
+      visual.circle.set({
+        left: canvasPos.x - radius,
+        top: canvasPos.y - radius,
+      });
+      
+      visual.icon.setPositionByOrigin(
+        new fabric.Point(canvasPos.x, canvasPos.y),
+        'center',
+        'center'
+      );
+      visual.icon.setCoords();
     }
-  });
+  }
+  
+  // Update all mask positions to match the image transform
+  for (const [labelId, maskObj] of maskVisuals.value) {
+    // Masks are fabric.Image objects that should match the main image's position/scale
+    maskObj.set({
+      left: fabricImg.left,
+      top: fabricImg.top,
+      scaleX: fabricImg.scaleX,
+      scaleY: fabricImg.scaleY,
+    });
+    maskObj.setCoords();
+  }
   
   fabricCanvas.renderAll();
 }
 
-function updateMaskPolygonPositions(): void {
-  if (!fabricCanvas || !fabricImg) return;
-  
-  const imgLeft = fabricImg.left || 0;
-  const imgTop = fabricImg.top || 0;
-  const imgScaleX = fabricImg.scaleX || 1;
-  
-  // Update each mask polygon position based on current image transform
-  maskContours.value.forEach((maskData, maskId) => {
-    const polygon = maskPolygons.value.get(maskId);
-    if (!polygon) return;
-    
-    // Recalculate canvas points from original pixel coordinates
-    const canvasPoints = maskData.contour.map(([x, y]) => ({
-      x: imgLeft + x * imgScaleX,
-      y: imgTop + y * imgScaleX,
-    }));
-    
-    // Update polygon points
-    polygon.set({ points: canvasPoints });
-    polygon.setCoords();
-  });
-  
-  fabricCanvas.renderAll();
-}
-
-async function requestSAMInference(): Promise<void> {
-  if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-    console.error('WebSocket not connected');
+async function savePointsForLabel(labelId: string): Promise<void> {
+  const points = pointsByLabel.value.get(labelId);
+  if (!points || points.length === 0 || !props.projectId || props.frameNumber === undefined) {
     return;
   }
-
-  if (points.value.length === 0) {
-    console.warn('No points to send');
-    return;
-  }
-
-  // SAM-003: Queue request for async processing
-  const requestId = `req-${Date.now()}-${Math.random()}`;
-
-  // Create promise for this request
-  const promise = new Promise<MaskData | null>((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
+  
+  try {
+    console.log('Saving points for label:', labelId, 'Count:', points.length);
     
-    // Set timeout to reject if no response after 10 seconds
-    setTimeout(() => {
-      if (pendingRequests.has(requestId)) {
-        pendingRequests.delete(requestId);
-        reject(new Error('SAM inference timeout'));
+    await api.post(
+      `/projects/${props.projectId}/frames/${props.frameNumber}/points`,
+      {
+        label_id: labelId,
+        points: points.map(p => ({
+          x: p.x,
+          y: p.y,
+          include: p.include,
+        })),
       }
-    }, 10000);
-  });
+    );
+    
+    console.log('Points saved successfully for label:', labelId);
+  } catch (error: any) {
+    console.error('Failed to save points:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
+  }
+}
 
+function requestSAMInference(labelId: string): void {
+  const points = pointsByLabel.value.get(labelId);
+  if (!points || points.length === 0) return;
+  
+  if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+    console.warn('WebSocket not connected, cannot request SAM inference');
+    return;
+  }
+  
   const request = {
     project_id: props.projectId,
     frame_number: props.frameNumber,
-    label_id: props.selectedLabelId,
-    points: points.value.map(p => [p.x, p.y]),
-    labels: points.value.map(p => (p.include ? 1 : 0)),
-    request_id: requestId,
+    label_id: labelId,
+    points: points.map(p => [p.x, p.y]),
+    labels: points.map(p => (p.include ? 1 : 0)),
+    request_id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
   };
-
+  
   console.log('Sending SAM request:', request);
+  websocket.send(JSON.stringify(request));
+}
 
+function renderMaskContour(mask: MaskContour): void {
+  if (!fabricCanvas || !fabricImg || !mask.contourPolygon || mask.contourPolygon.length === 0) {
+    return;
+  }
+  
+  // Remove existing mask visual for this label
+  const existingMask = maskVisuals.value.get(mask.labelId);
+  if (existingMask) {
+    fabricCanvas.remove(existingMask);
+    maskVisuals.value.delete(mask.labelId);
+  }
+  
+  const width = imageWidth.value;
+  const height = imageHeight.value;
+  
+  if (width === 0 || height === 0) return;
+  if (mask.contourPolygon.length < 3) return;
+  
+  // Create a canvas to render the mask as a filled polygon bitmap
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const ctx = tempCanvas.getContext('2d');
+  if (!ctx) return;
+  
+  // Parse the label color
+  const color = getLabelColor(mask.labelId);
+  const rgb = hexToRgb(color);
+  
+  // Draw the filled polygon
+  ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.4)`;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  
+  ctx.beginPath();
+  const firstPoint = mask.contourPolygon[0];
+  ctx.moveTo(firstPoint[0], firstPoint[1]);
+  
+  for (let i = 1; i < mask.contourPolygon.length; i++) {
+    const point = mask.contourPolygon[i];
+    ctx.lineTo(point[0], point[1]);
+  }
+  
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  
+  // Create fabric image from the mask canvas
+  const maskImage = new fabric.Image(tempCanvas, {
+    left: fabricImg.left,
+    top: fabricImg.top,
+    scaleX: fabricImg.scaleX,
+    scaleY: fabricImg.scaleY,
+    selectable: false,
+    evented: false,
+  });
+  
+  fabricCanvas.add(maskImage);
+  fabricCanvas.moveTo(maskImage, 1); // Behind points but in front of image
+  
+  // Bring all points to front
+  for (const visual of pointVisuals.value.values()) {
+    fabricCanvas.bringToFront(visual.circle);
+    fabricCanvas.bringToFront(visual.icon);
+  }
+  
+  maskVisuals.value.set(mask.labelId, maskImage);
+  fabricCanvas.renderAll();
+  
+  console.log('Rendered mask contour for label:', mask.labelId);
+}
+
+async function loadAllExistingData(): Promise<void> {
+  if (!props.projectId || props.frameNumber === undefined || !fabricCanvas || !fabricImg) {
+    return;
+  }
+  
+  // Prevent concurrent loads
+  if (isLoadingData.value) {
+    console.log('Load already in progress, skipping...');
+    return;
+  }
+  
+  isLoadingData.value = true;
+  
   try {
-    websocket.send(JSON.stringify(request));
+    console.log('Loading all existing data for frame:', props.frameNumber);
     
-    // Wait for response (async update)
-    try {
-      const mask = await promise;
-      if (mask) {
-        console.log('Received mask for request:', requestId);
+    // Clear existing data - this removes all visuals from canvas
+    clearAllVisuals();
+    pointsByLabel.value.clear();
+    masksByLabel.value.clear();
+    
+    // Ensure canvas is clean before loading
+    await nextTick();
+    
+    // Load points for ALL labels (don't filter by label_id)
+    const pointsResponse = await api.get(
+      `/projects/${props.projectId}/frames/${props.frameNumber}/points`
+    );
+    
+    if (pointsResponse.data && pointsResponse.data.length > 0) {
+      console.log('Loaded points:', pointsResponse.data.length);
+      
+      // Group points by label
+      for (const pointData of pointsResponse.data) {
+        const labelId = pointData.label_id || props.selectedLabelId;
+        
+        if (!pointsByLabel.value.has(labelId)) {
+          pointsByLabel.value.set(labelId, []);
+        }
+        
+        const point: Point = {
+          id: pointData.id,
+          x: pointData.x,
+          y: pointData.y,
+          include: pointData.include,
+          labelId: labelId,
+        };
+        
+        pointsByLabel.value.get(labelId)!.push(point);
+        renderPoint(point);
       }
-    } catch (error) {
-      console.error('Error waiting for SAM response:', error);
     }
-  } catch (error) {
-    console.error('Error sending SAM request:', error);
-    pendingRequests.delete(requestId);
+    
+    // Load masks for ALL labels (don't filter by label_id)
+    const masksResponse = await api.get(
+      `/projects/${props.projectId}/frames/${props.frameNumber}/masks`
+    );
+    
+    if (masksResponse.data && masksResponse.data.length > 0) {
+      console.log('Loaded masks:', masksResponse.data.length);
+      
+      for (const maskData of masksResponse.data) {
+        const labelId = maskData.label_id || props.selectedLabelId;
+        
+        const mask: MaskContour = {
+          labelId: labelId,
+          contourPolygon: maskData.contour_polygon,
+          area: maskData.area,
+        };
+        
+        masksByLabel.value.set(labelId, mask);
+        renderMaskContour(mask);
+      }
+    }
+  } catch (error: any) {
+    console.error('Failed to load existing data:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
+  } finally {
+    isLoadingData.value = false;
   }
 }
 
-function decodeRLE(rle: string, width: number, height: number): Uint8ClampedArray {
-  // Decode run-length encoding to binary mask
-  const mask = new Uint8ClampedArray(width * height);
+function clearAllVisuals(): void {
+  if (!fabricCanvas) return;
   
-  if (!rle || rle.length === 0) {
-    return mask;
+  // Remove all point visuals - create array copy to avoid iteration issues
+  const pointVisualsToRemove = Array.from(pointVisuals.value.values());
+  for (const visual of pointVisualsToRemove) {
+    try {
+      fabricCanvas.remove(visual.circle);
+      fabricCanvas.remove(visual.icon);
+    } catch (e) {
+      // Ignore errors if object already removed
+      console.debug('Error removing point visual:', e);
+    }
   }
+  pointVisuals.value.clear();
+  
+  // Remove all mask visuals - create array copy to avoid iteration issues
+  const maskVisualsToRemove = Array.from(maskVisuals.value.values());
+  for (const maskObj of maskVisualsToRemove) {
+    try {
+      fabricCanvas.remove(maskObj);
+    } catch (e) {
+      // Ignore errors if object already removed
+      console.debug('Error removing mask visual:', e);
+    }
+  }
+  maskVisuals.value.clear();
+  
+  fabricCanvas.renderAll();
+}
 
+function setupResizeObserver(): void {
+  if (!containerRef.value || !ResizeObserver) return;
+  
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+  }
+  
+  if (resizeTimeout) {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = null;
+  }
+  
+  resizeObserver = new ResizeObserver((entries) => {
+    if (!fabricCanvas || !fabricImg) return;
+    
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout);
+    }
+    
+    resizeTimeout = setTimeout(() => {
+      if (!fabricCanvas || !fabricImg || !containerRef.value) return;
+      
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        
+        if (width > 0 && height > 0) {
+          nextTick(() => {
+            if (!fabricCanvas || !fabricImg) return;
+            
+            const containerRect = containerRef.value?.getBoundingClientRect();
+            const actualWidth = containerRect?.width || width;
+            const actualHeight = containerRect?.height || height;
+            
+            fabricCanvas.setDimensions({
+              width: actualWidth,
+              height: actualHeight,
+            });
+            
+            const scaleX = actualWidth / imageWidth.value;
+            const scaleY = actualHeight / imageHeight.value;
+            const fitScale = Math.min(scaleX, scaleY, 1);
+            
+            scale.value = fitScale;
+            
+            fabricImg.set({
+              scaleX: fitScale,
+              scaleY: fitScale,
+            });
+            
+            const scaledWidth = imageWidth.value * fitScale;
+            const scaledHeight = imageHeight.value * fitScale;
+            const centerX = (actualWidth - scaledWidth) / 2;
+            const centerY = (actualHeight - scaledHeight) / 2;
+            
+            fabricImg.set({
+              left: centerX,
+              top: centerY,
+            });
+            
+            updateAllVisualPositions();
+            fabricCanvas.renderAll();
+          });
+        }
+      }
+    }, 50);
+  });
+  
+  resizeObserver.observe(containerRef.value);
+}
+
+function connectWebSocket(): void {
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    return;
+  }
+  
+  const wsUrl = `ws://localhost:8000/api/v1/sam3/inference`;
+  console.log('Connecting to SAM WebSocket:', wsUrl);
+  
+  websocket = new WebSocket(wsUrl);
+  
+  websocket.onopen = () => {
+    console.log('SAM WebSocket connected');
+    wsConnected.value = true;
+  };
+  
+  websocket.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log('Received SAM response:', data);
+      
+      // Handle queue status
+      if (data.queue_size !== undefined) {
+        return;
+      }
+      
+      // Handle mask response
+      // Note: The mask is already being saved by the backend when points are saved
+      // (see save_labeled_points endpoint which runs SAM inference in background)
+      // So we don't need to save it again here - just render it for preview
+      if (data.status === 'success' && data.mask_rle) {
+        const labelId = data.label_id;
+        
+        // Render the mask from RLE for immediate preview
+        // The backend has already saved it when points were saved
+        renderMaskFromRLE(data.mask_rle, labelId);
+        
+        // Reload data after a short delay to get the saved mask from database
+        // This ensures the mask is properly positioned with image transforms
+        setTimeout(async () => {
+          if (props.projectId && props.frameNumber !== undefined && props.frameNumber !== null) {
+            await loadAllExistingData();
+          }
+        }, 500); // Small delay to allow backend to finish saving
+      } else if (data.status === 'error') {
+        console.error('SAM inference error:', data.error);
+      }
+    } catch (error) {
+      console.error('Error parsing SAM WebSocket message:', error);
+    }
+  };
+  
+  websocket.onerror = (error) => {
+    console.error('SAM WebSocket error:', error);
+    wsConnected.value = false;
+  };
+  
+  websocket.onclose = () => {
+    console.log('SAM WebSocket closed');
+    wsConnected.value = false;
+    // Attempt reconnect
+    setTimeout(() => {
+      if (!websocket || websocket.readyState === WebSocket.CLOSED) {
+        connectWebSocket();
+      }
+    }, 3000);
+  };
+}
+
+function renderMaskFromRLE(rle: string, labelId: string): void {
+  if (!fabricCanvas || !fabricImg || !rle || rle.length === 0) return;
+  
+  const width = imageWidth.value;
+  const height = imageHeight.value;
+  
+  // Decode RLE to binary mask
+  const mask = new Uint8Array(width * height);
   const pairs = rle.split(';');
   
   for (const pair of pairs) {
@@ -747,545 +967,356 @@ function decodeRLE(rle: string, width: number, height: number): Uint8ClampedArra
     
     if (isNaN(start) || isNaN(length)) continue;
     
-    for (let i = 0; i < length; i++) {
-      const idx = start + i;
-      if (idx < mask.length) {
-        mask[idx] = 255;
-      }
+    for (let i = 0; i < length && start + i < mask.length; i++) {
+      mask[start + i] = 1;
     }
   }
   
-  return mask;
-}
-
-function renderMask(): void {
-  if (!fabricCanvas || !currentMask.value || !fabricImg) {
-    return;
+  // Remove existing mask visual for this label
+  const existingMask = maskVisuals.value.get(labelId);
+  if (existingMask) {
+    fabricCanvas.remove(existingMask);
+    maskVisuals.value.delete(labelId);
   }
-
-  // Remove old mask overlay if exists
-  if (maskOverlay) {
-    fabricCanvas.remove(maskOverlay);
-    maskOverlay = null;
-  }
-
-  const width = imageWidth.value;
-  const height = imageHeight.value;
-
-  // Decode RLE to binary mask
-  const maskData = decodeRLE(currentMask.value.rle, width, height);
-
-  // Create RGBA image data for the mask overlay
-  const imageData = new ImageData(width, height);
-  const color = hexToRgb(props.selectedLabelColor);
-
-  for (let i = 0; i < maskData.length; i++) {
-    const alpha = maskData[i];
-    if (alpha > 0) {
-      const pixelIdx = i * 4;
-      imageData.data[pixelIdx] = color.r;
-      imageData.data[pixelIdx + 1] = color.g;
-      imageData.data[pixelIdx + 2] = color.b;
-      imageData.data[pixelIdx + 3] = 128; // 50% transparency
-    }
-  }
-
-  // Create temporary canvas to hold the mask
+  
+  // Create a canvas to render the mask as an image
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = width;
   tempCanvas.height = height;
   const ctx = tempCanvas.getContext('2d');
   if (!ctx) return;
-
-  // Draw the mask first (this is the correct mask, don't modify imageData)
+  
+  // Parse the label color
+  const color = getLabelColor(labelId);
+  const rgb = hexToRgb(color);
+  
+  // Create image data with the mask (filled area)
+  const imageData = ctx.createImageData(width, height);
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i] === 1) {
+      const pixelIdx = i * 4;
+      imageData.data[pixelIdx] = rgb.r;
+      imageData.data[pixelIdx + 1] = rgb.g;
+      imageData.data[pixelIdx + 2] = rgb.b;
+      imageData.data[pixelIdx + 3] = 128; // 50% opacity
+    }
+  }
   ctx.putImageData(imageData, 0, 0);
   
-  // Draw border/stroke around the mask for better visibility
-  // Use a simpler approach: create a border by drawing on edge pixels
-  const borderColor = hexToRgb(props.selectedLabelColor);
+  // Draw border by finding edge pixels and drawing them with full opacity
+  const mask2d: boolean[][] = [];
+  for (let y = 0; y < height; y++) {
+    mask2d[y] = [];
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      mask2d[y][x] = mask[idx] > 0;
+    }
+  }
   
-  // Create a copy of imageData to work with for border detection (don't modify original)
-  const borderCanvas = document.createElement('canvas');
-  borderCanvas.width = width;
-  borderCanvas.height = height;
-  const borderCtx = borderCanvas.getContext('2d');
-  if (borderCtx) {
-    // Draw border pixels on edges
-    borderCtx.fillStyle = `rgb(${borderColor.r}, ${borderColor.g}, ${borderColor.b})`;
-    
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const alpha = imageData.data[idx + 3];
-        
-        // Only process mask pixels
-        if (alpha > 0) {
-          // Check if this is an edge pixel (has transparent neighbor)
-          const neighbors = [
-            [x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]
-          ];
-          
-          let isEdge = false;
-          for (const [nx, ny] of neighbors) {
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-              isEdge = true;
-              break;
-            }
-            const nIdx = (ny * width + nx) * 4;
-            if (imageData.data[nIdx + 3] === 0) {
-              isEdge = true;
-              break;
-            }
+  const directions = [[0, -1], [1, 0], [0, 1], [-1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+  const borderImageData = ctx.getImageData(0, 0, width, height);
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask2d[y][x]) {
+        // Check if this is an edge pixel
+        let isEdge = false;
+        for (const [dx, dy] of directions) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height || !mask2d[ny][nx]) {
+            isEdge = true;
+            break;
           }
-          
-          // Draw border pixel on edge
-          if (isEdge) {
-            borderCtx.fillRect(x, y, 1, 1);
-          }
+        }
+        if (isEdge) {
+          const pixelIdx = (y * width + x) * 4;
+          borderImageData.data[pixelIdx] = rgb.r;
+          borderImageData.data[pixelIdx + 1] = rgb.g;
+          borderImageData.data[pixelIdx + 2] = rgb.b;
+          borderImageData.data[pixelIdx + 3] = 255; // Full opacity for border
         }
       }
     }
-    
-    // Draw border on top of mask
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(borderCanvas, 0, 0);
   }
-
+  ctx.putImageData(borderImageData, 0, 0);
+  
   // Create fabric image from the mask canvas
-  maskOverlay = new fabric.Image(tempCanvas, {
+  const maskImage = new fabric.Image(tempCanvas, {
     left: fabricImg.left,
     top: fabricImg.top,
     scaleX: fabricImg.scaleX,
     scaleY: fabricImg.scaleY,
     selectable: false,
     evented: false,
-    opacity: 0.5,
-  });
-
-  fabricCanvas.add(maskOverlay);
-  // Ensure mask is above image but below points
-  fabricCanvas.moveTo(maskOverlay, 1);
-  
-  // Bring all points to front after adding mask
-  pointCircles.value.forEach((circle) => {
-    fabricCanvas?.bringToFront(circle);
-  });
-  pointIcons.value.forEach((icon) => {
-    fabricCanvas?.bringToFront(icon);
   });
   
-  fabricCanvas.renderAll();
-
-  console.log('Rendered mask overlay');
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  // Remove # if present
-  hex = hex.replace('#', '');
-  
-  const r = parseInt(hex.substring(0, 2), 16);
-  const g = parseInt(hex.substring(2, 4), 16);
-  const b = parseInt(hex.substring(4, 6), 16);
-  
-  return { r, g, b };
-}
-
-function renderContourPolygon(contourPolygon: number[][], maskId: string, labelColor: string): void {
-  if (!fabricCanvas || !fabricImg) return;
-  
-  // Remove existing polygon if it exists
-  const existingPolygon = maskPolygons.value.get(maskId);
-  if (existingPolygon) {
-    fabricCanvas.remove(existingPolygon);
-  }
-  
-  const imgLeft = fabricImg.left || 0;
-  const imgTop = fabricImg.top || 0;
-  const imgScaleX = fabricImg.scaleX || 1;
-  
-  // Convert pixel coordinates to canvas coordinates
-  // The contour_polygon is already in pixel coordinates, so we just need to apply
-  // the image's scale and position
-  const canvasPoints = contourPolygon.map(([x, y]) => ({
-    x: imgLeft + x * imgScaleX,
-    y: imgTop + y * imgScaleX,
-  }));
-  
-  // Create fabric polygon
-  const color = hexToRgb(labelColor);
-  const polygon = new fabric.Polygon(canvasPoints, {
-    fill: `rgba(${color.r}, ${color.g}, ${color.b}, 0.5)`,
-    stroke: `rgb(${color.r}, ${color.g}, ${color.b})`,
-    strokeWidth: 2,
-    selectable: false,
-    evented: false,
-    objectCaching: false,
-  });
-  
-  fabricCanvas.add(polygon);
-  // Place mask above image but below points
-  fabricCanvas.moveTo(polygon, 1);
+  fabricCanvas.add(maskImage);
+  fabricCanvas.moveTo(maskImage, 1); // Behind points but in front of image
   
   // Bring all points to front
-  pointCircles.value.forEach((circle) => {
-    fabricCanvas?.bringToFront(circle);
-  });
-  pointIcons.value.forEach((icon) => {
-    fabricCanvas?.bringToFront(icon);
-  });
+  for (const visual of pointVisuals.value.values()) {
+    fabricCanvas.bringToFront(visual.circle);
+    fabricCanvas.bringToFront(visual.icon);
+  }
   
-  // Store references
-  maskPolygons.value.set(maskId, polygon);
-  maskContours.value.set(maskId, { contour: contourPolygon, color: labelColor });
-  
+  maskVisuals.value.set(labelId, maskImage);
   fabricCanvas.renderAll();
-  console.log('Rendered contour polygon for mask:', maskId, 'with color:', labelColor);
+  
+  console.log('Rendered mask from RLE for label:', labelId);
 }
 
-async function savePoints(): Promise<void> {
-  if (!props.projectId || props.frameNumber === undefined || props.frameNumber === null || !props.selectedLabelId || points.value.length === 0) {
-    console.warn('Cannot save points: missing required data', {
+function rleToContour(rle: string, width: number, height: number): number[][] {
+  // Decode RLE to binary mask
+  const mask = new Uint8Array(width * height);
+  const pairs = rle.split(';');
+  
+  for (const pair of pairs) {
+    const [startStr, lengthStr] = pair.split(',');
+    const start = parseInt(startStr, 10);
+    const length = parseInt(lengthStr, 10);
+    
+    if (isNaN(start) || isNaN(length)) continue;
+    
+    for (let i = 0; i < length && start + i < mask.length; i++) {
+      mask[start + i] = 1;
+    }
+  }
+  
+  // Convert binary mask to 2D array
+  const mask2d: boolean[][] = [];
+  for (let y = 0; y < height; y++) {
+    mask2d[y] = [];
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      mask2d[y][x] = mask[idx] > 0;
+    }
+  }
+  
+  // Find edge pixels (mask pixels with at least one non-mask neighbor)
+  const edgePixels: number[][] = [];
+  const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // Up, Right, Down, Left
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask2d[y][x]) {
+        // Check if this is an edge pixel
+        let isEdge = false;
+        for (const [dx, dy] of directions) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height || !mask2d[ny][nx]) {
+            isEdge = true;
+            break;
+          }
+        }
+        if (isEdge) {
+          edgePixels.push([x, y]);
+        }
+      }
+    }
+  }
+  
+  // If no edge pixels, return empty contour
+  if (edgePixels.length === 0) {
+    return [];
+  }
+  
+  // Sort edge pixels to form a reasonable contour
+  edgePixels.sort((a, b) => {
+    if (a[1] !== b[1]) return a[1] - b[1]; // Sort by y first
+    return a[0] - b[0]; // Then by x
+  });
+  
+  return edgePixels;
+}
+
+function calculateMaskArea(rle: string, width: number, height: number): number {
+  const mask = new Uint8Array(width * height);
+  const pairs = rle.split(';');
+  
+  for (const pair of pairs) {
+    const [startStr, lengthStr] = pair.split(',');
+    const start = parseInt(startStr, 10);
+    const length = parseInt(lengthStr, 10);
+    
+    if (isNaN(start) || isNaN(length)) continue;
+    
+    for (let i = 0; i < length && start + i < mask.length; i++) {
+      mask[start + i] = 1;
+    }
+  }
+  
+  let area = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i] > 0) {
+      area++;
+    }
+  }
+  return area;
+}
+
+async function saveMaskFromRLE(rle: string, labelId: string): Promise<void> {
+  if (!props.projectId || props.frameNumber === undefined || props.frameNumber === null || !labelId) {
+    console.warn('Cannot save mask: missing required data', {
       projectId: props.projectId,
       frameNumber: props.frameNumber,
-      selectedLabelId: props.selectedLabelId,
-      pointsCount: points.value.length,
+      labelId: labelId,
     });
     return;
   }
 
   try {
-    console.log('Saving points:', {
-      projectId: props.projectId,
-      frameNumber: props.frameNumber,
-      labelId: props.selectedLabelId,
-      pointsCount: points.value.length,
-    });
+    console.log('Saving mask from RLE for label:', labelId);
     
-    const response = await api.post(
-      `/projects/${props.projectId}/frames/${props.frameNumber}/points`,
-      {
-        label_id: props.selectedLabelId,
-        points: points.value.map(p => ({
-          x: p.x,
-          y: p.y,
-          include: p.include,
-        })),
-      }
-    );
-    console.log('Points saved successfully:', response.data);
-  } catch (error: any) {
-    console.error('Failed to save points:', error);
-    if (error.response) {
-      console.error('Error response:', error.response.data);
-    }
-  }
-}
+    // Convert RLE mask to contour polygon
+    const contourPolygon = rleToContour(rle, imageWidth.value, imageHeight.value);
+    const area = calculateMaskArea(rle, imageWidth.value, imageHeight.value);
 
-async function loadExistingData(): Promise<void> {
-  if (!props.projectId || props.frameNumber === undefined || props.frameNumber === null || !fabricCanvas || !fabricImg) {
-    console.warn('Cannot load existing data: missing required data', {
-      projectId: props.projectId,
-      frameNumber: props.frameNumber,
-      hasCanvas: !!fabricCanvas,
-      hasImg: !!fabricImg,
+    console.log('Mask conversion:', {
+      contourPoints: contourPolygon.length,
+      area: area,
     });
-    return;
-  }
 
-  try {
-    console.log('Loading existing data for:', {
-      projectId: props.projectId,
-      frameNumber: props.frameNumber,
-      selectedLabelId: props.selectedLabelId,
-    });
-    
-    // Load existing points for the current label (if selected) or all points
-    const pointsParams: { label_id?: string } = {};
-    if (props.selectedLabelId) {
-      pointsParams.label_id = props.selectedLabelId;
-    }
-    
-    const pointsResponse = await api.get(
-      `/projects/${props.projectId}/frames/${props.frameNumber}/points`,
-      { params: pointsParams }
-    );
-    
-    console.log('Points response:', pointsResponse.data);
-    
-    if (pointsResponse.data && pointsResponse.data.length > 0) {
-      // Clear existing points
-      points.value = [];
-      pointCircles.value.forEach((circle) => {
-        if (fabricCanvas) {
-          fabricCanvas.remove(circle);
-        }
-      });
-      pointCircles.value.clear();
-      pointIcons.value.forEach((icon) => {
-        if (fabricCanvas) {
-          fabricCanvas.remove(icon);
-        }
-      });
-      pointIcons.value.clear();
-      
-      // Clear existing mask polygons
-      maskPolygons.value.forEach((polygon) => {
-        if (fabricCanvas) {
-          fabricCanvas.remove(polygon);
-        }
-      });
-      maskPolygons.value.clear();
-      maskContours.value.clear();
-      
-      // Load points
-      for (const pointData of pointsResponse.data) {
-        const point: Point = {
-          id: pointData.id,
-          x: pointData.x,
-          y: pointData.y,
-          include: pointData.include,
-        };
-        points.value.push(point);
-        
-        // Render point
-        if (fabricCanvas && fabricImg) {
-          const imgLeft = fabricImg.left || 0;
-          const imgTop = fabricImg.top || 0;
-          const imgScaleX = fabricImg.scaleX || 1;
-          const canvasX = imgLeft + point.x * imageWidth.value * imgScaleX;
-          const canvasY = imgTop + point.y * imageHeight.value * imgScaleX;
-          renderPoint(point, canvasX, canvasY);
-        }
-      }
-      console.log('Loaded existing points:', points.value.length);
-    } else {
-      console.log('No existing points found');
-    }
-    
-    // Load existing masks for the current label (if selected) or all masks
-    const masksParams: { label_id?: string } = {};
-    if (props.selectedLabelId) {
-      masksParams.label_id = props.selectedLabelId;
-    }
-    
-    const masksResponse = await api.get(
-      `/projects/${props.projectId}/frames/${props.frameNumber}/masks`,
-      { params: masksParams }
-    );
-    
-    console.log('Masks response:', masksResponse.data);
-    
-    if (masksResponse.data && masksResponse.data.length > 0) {
-      console.log('Loaded existing masks:', masksResponse.data.length);
-      
-      // Create a map of label_id to label color for quick lookup
-      const labelColorMap = new Map<string, string>();
-      props.labels?.forEach(label => {
-        labelColorMap.set(label.id, label.color_hex);
-      });
-      
-      // Render each mask as a polygon
-      for (const maskData of masksResponse.data) {
-        if (maskData.contour_polygon && maskData.contour_polygon.length > 0) {
-          // Look up the label color, fallback to selected label color or default
-          const labelColor = labelColorMap.get(maskData.label_id) || props.selectedLabelColor || '#2563eb';
-          renderContourPolygon(maskData.contour_polygon, maskData.id, labelColor);
-        }
-      }
-    } else {
-      console.log('No existing masks found');
-    }
-  } catch (error: any) {
-    console.error('Failed to load existing data:', error);
-    if (error.response) {
-      console.error('Error response:', error.response.data);
-    }
-  }
-}
-
-// Watch for image URL changes
-watch(() => props.imageUrl, (newUrl) => {
-  if (newUrl) {
-    loadImage(newUrl);
-    // Clear points when image changes
-    points.value = [];
-    // Remove all point circles and icons
-    pointCircles.value.forEach((circle) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(circle);
-      }
-    });
-    pointCircles.value.clear();
-    pointIcons.value.forEach((icon) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(icon);
-      }
-    });
-    pointIcons.value.clear();
-    // Remove all mask polygons
-    maskPolygons.value.forEach((polygon) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(polygon);
-      }
-    });
-    maskPolygons.value.clear();
-    maskContours.value.clear();
-  }
-}, { immediate: true });
-
-// Watch for frame or label changes to reload data (combined to avoid duplicate calls)
-watch(
-  () => ({ frameNumber: props.frameNumber, selectedLabelId: props.selectedLabelId }),
-  async () => {
-    if (fabricCanvas && fabricImg && props.projectId && props.frameNumber !== undefined) {
-      await loadExistingData();
-    }
-  },
-  { deep: false } // Not deep, just watching the object reference changes
-);
-
-// Expose reset view function and points
-defineExpose({
-  resetView,
-  getPoints: () => points.value,
-  clearPoints: () => {
-    points.value = [];
-    // Remove all point circles and icons
-    pointCircles.value.forEach((circle) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(circle);
-      }
-    });
-    pointCircles.value.clear();
-    pointIcons.value.forEach((icon) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(icon);
-      }
-    });
-    pointIcons.value.clear();
-    // Remove all mask polygons
-    maskPolygons.value.forEach((polygon) => {
-      if (fabricCanvas) {
-        fabricCanvas.remove(polygon);
-      }
-    });
-    maskPolygons.value.clear();
-    maskContours.value.clear();
-  },
-});
-
-function connectWebSocket(): void {
-  if (websocket && websocket.readyState === WebSocket.OPEN) {
-    return; // Already connected
-  }
-
-  const wsUrl = `ws://localhost:8000/api/v1/sam3/inference`;
-  console.log('Connecting to SAM WebSocket:', wsUrl);
-
-  websocket = new WebSocket(wsUrl);
-
-  websocket.onopen = () => {
-    console.log('SAM WebSocket connected');
-    wsConnected.value = true;
-  };
-
-  websocket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      console.log('Received SAM status update:', data);
-      // Just log status updates - actual masks are fetched on page load
-    } catch (error) {
-      console.error('Error parsing SAM WebSocket message:', error);
-    }
-  };
-
-  websocket.onerror = (error) => {
-    console.error('SAM WebSocket error:', error);
-    wsConnected.value = false;
-  };
-
-  websocket.onclose = () => {
-    console.log('SAM WebSocket closed');
-    wsConnected.value = false;
-    // Attempt to reconnect after delay
-    setTimeout(() => {
-      if (websocket?.readyState === WebSocket.CLOSED) {
-        connectWebSocket();
-      }
-    }, 3000);
-  };
-}
-
-function toggleMode(): void {
-  includeMode.value = !includeMode.value;
-  console.log(`Switched to ${includeMode.value ? 'include' : 'exclude'} mode`);
-  // Update cursor
-  if (containerRef.value && !isDragging.value) {
-    containerRef.value.style.cursor = includeMode.value ? 'crosshair' : 'not-allowed';
-  }
-}
-
-onMounted(() => {
-  // Set up keyboard listeners
-  const handleKeyPress = (e: KeyboardEvent) => {
-    // Check if not typing in input
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+    // Validate contour polygon
+    if (!contourPolygon || contourPolygon.length === 0) {
+      console.warn('Cannot save mask: empty contour polygon');
       return;
     }
 
-    const key = e.key.toLowerCase();
-    
-    if (key === 'r') {
-      resetView();
-    } else if (key === 'i') {
-      // Include mode
-      includeMode.value = true;
-      if (containerRef.value && !isDragging.value) {
-        containerRef.value.style.cursor = 'crosshair';
-      }
-    } else if (key === 'u') {
-      // Exclude/Undo mode
-      includeMode.value = false;
-      if (containerRef.value && !isDragging.value) {
-        containerRef.value.style.cursor = 'not-allowed';
-      }
-    }
-  };
-  
-  window.addEventListener('keydown', handleKeyPress);
+    // Ensure all contour points are valid [x, y] pairs and convert to floats
+    const validContour = contourPolygon
+      .filter(point => 
+        Array.isArray(point) && point.length === 2 && 
+        typeof point[0] === 'number' && typeof point[1] === 'number'
+      )
+      .map(point => [Number.parseFloat(point[0].toString()), Number.parseFloat(point[1].toString())]);
 
-  // Connect to WebSocket
-  connectWebSocket();
-  
-  return () => {
-    window.removeEventListener('keydown', handleKeyPress);
+    if (validContour.length === 0) {
+      console.warn('Cannot save mask: no valid contour points');
+      return;
+    }
+
+    // Ensure area is a valid float
+    const validArea = Number.parseFloat(area.toString());
+    if (isNaN(validArea) || validArea < 0) {
+      console.warn('Cannot save mask: invalid area', validArea);
+      return;
+    }
+
+    const requestBody = {
+      label_id: labelId,
+      mask: {
+        contour_polygon: validContour,
+        area: validArea,
+      },
+    };
+
+        const response = await api.post(
+          `/projects/${props.projectId}/frames/${props.frameNumber}/masks`,
+          requestBody
+        );
+        console.log('Mask saved successfully:', response.data);
+        
+        // Don't update masksByLabel here - let loadAllExistingData handle it
+        // This prevents double rendering (RLE render + contour render)
+  } catch (error: any) {
+    console.error('Failed to save mask:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
+  }
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  hex = hex.replace('#', '');
+  return {
+    r: parseInt(hex.substring(0, 2), 16),
+    g: parseInt(hex.substring(2, 4), 16),
+    b: parseInt(hex.substring(4, 6), 16),
   };
+}
+
+// Watch for image URL changes - load new image
+watch(() => props.imageUrl, (newUrl) => {
+  if (newUrl) {
+    clearAllVisuals();
+    pointsByLabel.value.clear();
+    masksByLabel.value.clear();
+    loadImage(newUrl);
+  }
+}, { immediate: true });
+
+// Watch for frame changes - reload data
+watch(() => props.frameNumber, async () => {
+  if (fabricCanvas && fabricImg && props.projectId) {
+    // Clear visuals before loading new data to prevent duplicates
+    clearAllVisuals();
+    pointsByLabel.value.clear();
+    masksByLabel.value.clear();
+    await loadAllExistingData();
+  }
+});
+
+// Note: We do NOT reload when selectedLabelId changes
+// because we now show ALL labels' points at once
+// The selectedLabelId only affects which label new clicks are assigned to
+
+// Keyboard handlers
+function handleKeyPress(e: KeyboardEvent): void {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+    return;
+  }
+  
+  const key = e.key.toLowerCase();
+  
+  if (key === 'r') {
+    resetView();
+  } else if (key === 'i') {
+    includeMode.value = true;
+    if (containerRef.value) {
+      containerRef.value.style.cursor = 'crosshair';
+    }
+  } else if (key === 'u') {
+    includeMode.value = false;
+    if (containerRef.value) {
+      containerRef.value.style.cursor = 'not-allowed';
+    }
+  }
+}
+
+// Expose methods
+defineExpose({
+  resetView,
+  getPointsByLabel: () => pointsByLabel.value,
+  clearAllPoints: () => {
+    clearAllVisuals();
+    pointsByLabel.value.clear();
+    masksByLabel.value.clear();
+  },
+});
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyPress);
+  connectWebSocket();
 });
 
 onBeforeUnmount(() => {
-  // Clean up window event listeners
-  if (windowMouseMoveHandler) {
-    window.removeEventListener('mousemove', windowMouseMoveHandler);
-    windowMouseMoveHandler = null;
-  }
-  if (windowMouseUpHandler) {
-    window.removeEventListener('mouseup', windowMouseUpHandler);
-    windowMouseUpHandler = null;
-  }
+  window.removeEventListener('keydown', handleKeyPress);
   
-  // Clean up resize observer
+  // Clean up container event handlers
+  cleanupEventHandlers();
+  
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
   }
   
-  // Clear any pending resize timeout
   if (resizeTimeout) {
     clearTimeout(resizeTimeout);
     resizeTimeout = null;
   }
   
-  // Close WebSocket
   if (websocket) {
     websocket.close();
     websocket = null;
@@ -1295,7 +1326,7 @@ onBeforeUnmount(() => {
     try {
       fabricCanvas.dispose();
     } catch (e) {
-      console.warn('Error disposing canvas on unmount:', e);
+      console.warn('Error disposing canvas:', e);
     }
     fabricCanvas = null;
     fabricImg = null;
@@ -1313,6 +1344,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
   height: 700px;
   width: 100%;
+  cursor: crosshair;
 }
 
 .image-viewer canvas {
@@ -1360,4 +1392,23 @@ onBeforeUnmount(() => {
   font-size: 0.875rem;
   color: #9ca3af;
 }
+
+.mode-indicator {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 6px 12px;
+  background: rgba(34, 197, 94, 0.9);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+  pointer-events: none;
+  transition: background 0.2s ease;
+}
+
+.mode-indicator.exclude {
+  background: rgba(239, 68, 68, 0.9);
+}
 </style>
+
