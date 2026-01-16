@@ -13,8 +13,6 @@ from .list_project_images import list_project_images
 from .list_projects import list_projects
 from .mark_stage_visited import mark_stage_visited
 from .preview_frame import preview_frame
-from .save_labeled_points import save_labeled_points
-from .save_mask import save_mask
 from .set_trim_range import set_trim_range
 from .shared_objects import router
 from .update_project import update_project
@@ -38,8 +36,6 @@ __all__ = [
     "mark_stage_visited",
     "preview_frame",
     "router",
-    "save_labeled_points",
-    "save_mask",
     "set_trim_range",
     "update_project",
     "upload_video_chunk",

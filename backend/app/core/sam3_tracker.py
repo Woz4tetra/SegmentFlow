@@ -668,6 +668,52 @@ class SAM3Tracker:
 
         return masks
 
+    def get_single_frame_mask(
+        self,
+        frame_idx: int,
+        obj_id: int,
+        points: np.ndarray,
+        labels: np.ndarray,
+    ) -> np.ndarray | None:
+        """Get a mask for points on a single frame without video context.
+
+        This is optimized for single-image annotation (manual labeling) where
+        we don't need to propagate across a video. Uses SAM3's preview mode
+        which loads limited context frames for inference.
+
+        Args:
+            frame_idx: Frame index in the images directory (always 0 for single image)
+            obj_id: Object ID
+            points: Point coordinates [[x, y], ...] (normalized 0-1)
+            labels: Point labels [1, 0, ...] (1=positive, 0=negative)
+
+        Returns:
+            Mask at original resolution, or None if inference fails
+        """
+        if len(points) == 0:
+            return None
+
+        # Ensure model is loaded
+        if self.model is None or self.predictor is None:
+            self.load_model()
+            if self.model is None or self.predictor is None:
+                raise RuntimeError("Failed to load SAM3 model")
+
+        if self.images_dir is None:
+            raise RuntimeError("No images directory set. Call set_images_dir() first.")
+
+        if frame_idx >= self.total_frames:
+            raise ValueError(f"Frame index {frame_idx} out of range (total: {self.total_frames})")
+
+        # Use get_preview_mask which is designed for single-frame inference
+        # It handles frame context loading and inference state setup properly
+        return self.get_preview_mask(
+            frame_idx=frame_idx,
+            obj_id=obj_id,
+            points=points,
+            labels=labels,
+        )
+
     def cleanup(self) -> None:
         """Clean up all resources."""
         self._reset_inference_state()

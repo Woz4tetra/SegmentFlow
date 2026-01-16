@@ -448,21 +448,6 @@ class SAMMaskResponse(BaseModel):
 
 # ===== Labeled Points and Masks Schemas =====
 
-
-class LabeledPointCreate(BaseModel):
-    """Schema for creating a labeled point.
-
-    Attributes:
-        x: Normalized x coordinate [0, 1]
-        y: Normalized y coordinate [0, 1]
-        include: Whether this is an include (positive) or exclude (negative) point
-    """
-
-    x: float = Field(..., ge=0, le=1, description="Normalized x coordinate")
-    y: float = Field(..., ge=0, le=1, description="Normalized y coordinate")
-    include: bool = Field(True, description="Include (positive) or exclude (negative) point")
-
-
 class LabeledPointResponse(BaseModel):
     """Schema for labeled point response.
 
@@ -480,69 +465,22 @@ class LabeledPointResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
-class MaskCreate(BaseModel):
-    """Schema for creating a mask.
-
-    Attributes:
-        contour_polygon: Contour polygon as list of [x, y] coordinates
-        area: Area of the mask in pixels
-    """
-
-    contour_polygon: list[list[float]] = Field(..., description="Contour polygon [[x, y], ...]")
-    area: float = Field(..., ge=0, description="Mask area in pixels")
-
-
 class MaskResponse(BaseModel):
     """Schema for mask response.
 
     Attributes:
         id: Mask UUID
+        label_id: UUID of the label this mask belongs to
         contour_polygon: Contour polygon as list of [x, y] coordinates
         area: Area of the mask in pixels
     """
 
     id: UUID
+    label_id: UUID
     contour_polygon: list[list[float]]
     area: float
 
     model_config = {"from_attributes": True}
-
-
-class SaveLabeledPointsRequest(BaseModel):
-    """Schema for saving labeled points for an image.
-
-    Attributes:
-        label_id: UUID of the label
-        points: List of points to save
-    """
-
-    label_id: UUID = Field(..., description="Label UUID")
-    points: list[LabeledPointCreate] = Field(..., description="List of points to save")
-
-
-class SaveMaskRequest(BaseModel):
-    """Schema for saving a mask for an image.
-
-    Attributes:
-        label_id: UUID of the label
-        mask: Mask data to save
-    """
-
-    label_id: UUID = Field(..., description="Label UUID")
-    mask: MaskCreate = Field(..., description="Mask data to save")
-
-    project_id: UUID = Field(..., description="Project UUID")
-    frame_number: int = Field(..., ge=0, description="Frame number")
-    mask_rle: str | None = Field(None, description="Run-length encoded mask")
-    mask_bbox: list[int] | None = Field(
-        None,
-        description="Bounding box [x, y, width, height]",
-    )
-    request_id: str | None = Field(None, description="Client request ID")
-    inference_time_ms: float = Field(..., ge=0, description="Inference time in ms")
-    status: str = Field(..., description="Response status: success or error")
-    error: str | None = Field(None, description="Error message if failed")
 
 
 class SAMQueueStatusResponse(BaseModel):

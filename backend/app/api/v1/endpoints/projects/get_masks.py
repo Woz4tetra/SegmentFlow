@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.v1.schemas import MaskResponse
 from app.core.database import get_db
@@ -64,8 +65,8 @@ async def get_masks(
                 detail=f"Image not found for frame {frame_number}",
             )
 
-        # Query masks
-        query = select(Mask).where(Mask.image_id == image.id)
+        # Query masks with label relationship eagerly loaded
+        query = select(Mask).where(Mask.image_id == image.id).options(selectinload(Mask.label))
         if label_id:
             query = query.where(Mask.label_id == label_id)
 

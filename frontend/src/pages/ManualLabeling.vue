@@ -36,6 +36,7 @@
           :frame-number="currentFrameNumber"
           :selected-label-id="selectedLabel?.id"
           :selected-label-color="selectedLabel?.color_hex || '#2563eb'"
+          :labels="labels"
         />
         <div v-else class="no-image">
           No images available. Please complete the trim stage first.
