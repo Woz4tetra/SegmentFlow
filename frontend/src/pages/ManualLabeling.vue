@@ -239,7 +239,7 @@ const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
 const viewerWidth = ref(1200);
 const viewerHeight = ref(800);
-const bigJumpSize = ref(100); // TODO[NAV-004]: Load from config
+const bigJumpSize = ref(500); // Default value, will be loaded from server config
 const hoveredLabelId = ref<string | null>(null); // Track which label is being hovered
 const sidebarVisible = ref(true); // Sidebar visibility state
 
@@ -319,6 +319,19 @@ async function fetchLabels(): Promise<void> {
   }
 }
 
+async function fetchSettings(): Promise<void> {
+  try {
+    const { data } = await api.get<{ big_jump_size: number }>('/settings');
+    if (data.big_jump_size) {
+      bigJumpSize.value = data.big_jump_size;
+      console.log('Loaded big_jump_size from config:', bigJumpSize.value);
+    }
+  } catch (error) {
+    console.error('Failed to fetch settings:', error);
+    // Keep default value
+  }
+}
+
 function selectLabel(label: Label): void {
   selectedLabel.value = label;
   console.log('Selected label:', label.name);
@@ -389,13 +402,35 @@ function previousFrame(): void {
 }
 
 function nextLabeledFrame(): void {
-  // TODO[NAV-003]: Implement finding next labeled frame
-  console.log('Next labeled frame');
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex < 0) return;
+  
+  // Find the next frame that is manually labeled (after current frame)
+  for (let i = currentIndex + 1; i < images.value.length; i++) {
+    if (images.value[i].manually_labeled) {
+      currentFrameNumber.value = images.value[i].frame_number;
+      return;
+    }
+  }
+  
+  // No labeled frame found after current position
+  console.log('No more labeled frames ahead');
 }
 
 function previousLabeledFrame(): void {
-  // TODO[NAV-003]: Implement finding previous labeled frame
-  console.log('Previous labeled frame');
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex < 0) return;
+  
+  // Find the previous frame that is manually labeled (before current frame)
+  for (let i = currentIndex - 1; i >= 0; i--) {
+    if (images.value[i].manually_labeled) {
+      currentFrameNumber.value = images.value[i].frame_number;
+      return;
+    }
+  }
+  
+  // No labeled frame found before current position
+  console.log('No more labeled frames behind');
 }
 
 function bigJump(): void {
@@ -461,8 +496,8 @@ onMounted(async () => {
       project.value = manualRes.data;
     }
     
-    // Load images and labels from backend
-    await Promise.all([fetchImages(), fetchLabels()]);
+    // Load images, labels, and settings from backend
+    await Promise.all([fetchImages(), fetchLabels(), fetchSettings()]);
   } catch (error) {
     console.error('Failed during initialization:', error);
   }
