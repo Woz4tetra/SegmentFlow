@@ -64,6 +64,11 @@ const props = withDefaults(defineProps<Props>(), {
   labels: () => [],
 });
 
+// Emit events to parent component
+const emit = defineEmits<{
+  (e: 'frame-labeled', frameNumber: number): void;
+}>();
+
 // Point stored per label
 interface Point {
   x: number;
@@ -607,6 +612,9 @@ async function savePointsForLabel(labelId: string): Promise<void> {
     );
     
     console.log('Points saved successfully for label:', labelId);
+    
+    // Notify parent that this frame has been labeled
+    emit('frame-labeled', props.frameNumber);
   } catch (error: any) {
     console.error('Failed to save points:', error);
     if (error.response) {

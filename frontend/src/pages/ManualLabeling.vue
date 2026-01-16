@@ -37,6 +37,7 @@
           :selected-label-id="selectedLabel?.id"
           :selected-label-color="selectedLabel?.color_hex || '#2563eb'"
           :labels="labels"
+          @frame-labeled="onFrameLabeled"
         />
         <div v-else class="no-image">
           No images available. Please complete the trim stage first.
@@ -431,6 +432,15 @@ function previousLabeledFrame(): void {
   
   // No labeled frame found before current position
   console.log('No more labeled frames behind');
+}
+
+function onFrameLabeled(frameNumber: number): void {
+  // Update the local images array to mark this frame as labeled
+  const image = images.value.find(img => img.frame_number === frameNumber);
+  if (image) {
+    image.manually_labeled = true;
+    console.log('Frame marked as labeled:', frameNumber);
+  }
 }
 
 function bigJump(): void {
