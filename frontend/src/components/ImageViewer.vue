@@ -120,6 +120,9 @@ const imageHeight = ref(0);
 let websocket: WebSocket | null = null;
 const wsConnected = ref(false);
 
+// Track the latest SAM request ID per label to ignore out-of-order responses
+const latestRequestByLabel = ref<Map<string, string>>(new Map());
+
 // Cleanup references
 let resizeObserver: ResizeObserver | null = null;
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -397,6 +400,12 @@ function handleClick(e: MouseEvent): void {
     return;
   }
   
+  // Don't allow clicks while data is loading - prevents race conditions with orphaned visuals
+  if (isLoadingData.value) {
+    console.log('Click ignored - data load in progress');
+    return;
+  }
+  
   if (!containerRef.value) return;
   
   const rect = containerRef.value.getBoundingClientRect();
@@ -449,6 +458,9 @@ function handleClick(e: MouseEvent): void {
 
 function renderPoint(point: Point): void {
   if (!fabricCanvas) return;
+  
+  // Don't render if we're in the middle of loading data (except when called from loadAllExistingData itself)
+  // This check is skipped during load because loadAllExistingData calls renderPoint after clearing
   
   // Remove existing visual for this point if it exists
   const existingVisual = pointVisuals.value.get(point.id);
@@ -612,13 +624,19 @@ function requestSAMInference(labelId: string): void {
     return;
   }
   
+  const requestId = `req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  
+  // Track this as the latest request for this label
+  // Any older responses that arrive later will be ignored
+  latestRequestByLabel.value.set(labelId, requestId);
+  
   const request = {
     project_id: props.projectId,
     frame_number: props.frameNumber,
     label_id: labelId,
     points: points.map(p => [p.x, p.y]),
     labels: points.map(p => (p.include ? 1 : 0)),
-    request_id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    request_id: requestId,
   };
   
   console.log('Sending SAM request:', request);
@@ -630,12 +648,24 @@ function renderMaskContour(mask: MaskContour): void {
     return;
   }
   
-  // Remove existing mask visual for this label
-  const existingMask = maskVisuals.value.get(mask.labelId);
-  if (existingMask) {
-    fabricCanvas.remove(existingMask);
-    maskVisuals.value.delete(mask.labelId);
+  // Remove ALL existing mask visuals for this label - scan canvas objects directly
+  // This is more reliable than relying on the Map which might have stale references
+  const objectsToRemove: fabric.Object[] = [];
+  fabricCanvas.getObjects().forEach((obj: any) => {
+    if (obj.isMaskOverlay && obj.maskLabelId === mask.labelId) {
+      objectsToRemove.push(obj);
+    }
+  });
+  
+  for (const obj of objectsToRemove) {
+    fabricCanvas.remove(obj);
   }
+  
+  // Also clear from our tracking maps
+  maskVisuals.value.delete(mask.labelId);
+  
+  // Force a render to ensure the old mask is visually cleared before drawing new one
+  fabricCanvas.renderAll();
   
   const width = imageWidth.value;
   const height = imageHeight.value;
@@ -672,7 +702,8 @@ function renderMaskContour(mask: MaskContour): void {
   ctx.fill();
   ctx.stroke();
   
-  // Create fabric image from the mask canvas
+  // Create fabric image from the mask canvas (contour version)
+  // Add custom properties to identify this as a mask overlay for easy removal later
   const maskImage = new fabric.Image(tempCanvas, {
     left: fabricImg.left,
     top: fabricImg.top,
@@ -680,7 +711,11 @@ function renderMaskContour(mask: MaskContour): void {
     scaleY: fabricImg.scaleY,
     selectable: false,
     evented: false,
-  });
+  }) as fabric.Image & { isMaskOverlay: boolean; maskLabelId: string };
+  
+  // Mark this object as a mask overlay so we can find and remove it later
+  maskImage.isMaskOverlay = true;
+  maskImage.maskLabelId = mask.labelId;
   
   fabricCanvas.add(maskImage);
   fabricCanvas.moveTo(maskImage, 1); // Behind points but in front of image
@@ -797,7 +832,7 @@ function clearAllVisuals(): void {
   }
   pointVisuals.value.clear();
   
-  // Remove all mask visuals - create array copy to avoid iteration issues
+  // Remove all mask visuals - first from the map
   const maskVisualsToRemove = Array.from(maskVisuals.value.values());
   for (const maskObj of maskVisualsToRemove) {
     try {
@@ -808,6 +843,22 @@ function clearAllVisuals(): void {
     }
   }
   maskVisuals.value.clear();
+  
+  // Also scan canvas directly for any mask overlays that might have been missed
+  // This catches orphaned masks that weren't properly tracked in the map
+  const allMaskOverlays: fabric.Object[] = [];
+  fabricCanvas.getObjects().forEach((obj: any) => {
+    if (obj.isMaskOverlay) {
+      allMaskOverlays.push(obj);
+    }
+  });
+  for (const obj of allMaskOverlays) {
+    try {
+      fabricCanvas.remove(obj);
+    } catch (e) {
+      console.debug('Error removing orphaned mask overlay:', e);
+    }
+  }
   
   fabricCanvas.renderAll();
 }
@@ -913,18 +964,23 @@ function connectWebSocket(): void {
       // So we don't need to save it again here - just render it for preview
       if (data.status === 'success' && data.mask_rle) {
         const labelId = data.label_id;
+        const requestId = data.request_id;
+        
+        // Check if this response is for the latest request for this label
+        // If not, ignore it to prevent out-of-order responses from showing stale masks
+        const latestRequest = latestRequestByLabel.value.get(labelId);
+        if (latestRequest && requestId !== latestRequest) {
+          console.log('Ignoring stale SAM response:', requestId, 'latest is:', latestRequest);
+          return;
+        }
         
         // Render the mask from RLE for immediate preview
         // The backend has already saved it when points were saved
+        // Note: We do NOT auto-reload from database here because it causes race conditions
+        // when user adds multiple points quickly. The RLE preview is accurate and the
+        // contour-based mask will be loaded when navigating to another frame and back,
+        // or on page refresh.
         renderMaskFromRLE(data.mask_rle, labelId);
-        
-        // Reload data after a short delay to get the saved mask from database
-        // This ensures the mask is properly positioned with image transforms
-        setTimeout(async () => {
-          if (props.projectId && props.frameNumber !== undefined && props.frameNumber !== null) {
-            await loadAllExistingData();
-          }
-        }, 500); // Small delay to allow backend to finish saving
       } else if (data.status === 'error') {
         console.error('SAM inference error:', data.error);
       }
@@ -953,6 +1009,12 @@ function connectWebSocket(): void {
 function renderMaskFromRLE(rle: string, labelId: string): void {
   if (!fabricCanvas || !fabricImg || !rle || rle.length === 0) return;
   
+  // Don't render if we're in the middle of loading data - prevents orphaned visuals
+  if (isLoadingData.value) {
+    console.log('Skipping RLE render - data load in progress');
+    return;
+  }
+  
   const width = imageWidth.value;
   const height = imageHeight.value;
   
@@ -972,12 +1034,25 @@ function renderMaskFromRLE(rle: string, labelId: string): void {
     }
   }
   
-  // Remove existing mask visual for this label
-  const existingMask = maskVisuals.value.get(labelId);
-  if (existingMask) {
-    fabricCanvas.remove(existingMask);
-    maskVisuals.value.delete(labelId);
+  // Remove ALL existing mask visuals for this label - scan canvas objects directly
+  // This is more reliable than relying on the Map which might have stale references
+  const objectsToRemove: fabric.Object[] = [];
+  fabricCanvas.getObjects().forEach((obj: any) => {
+    if (obj.isMaskOverlay && obj.maskLabelId === labelId) {
+      objectsToRemove.push(obj);
+    }
+  });
+  
+  for (const obj of objectsToRemove) {
+    fabricCanvas.remove(obj);
   }
+  
+  // Also clear from our tracking maps
+  maskVisuals.value.delete(labelId);
+  masksByLabel.value.delete(labelId);
+  
+  // Force a render to ensure the old mask is visually cleared before drawing new one
+  fabricCanvas.renderAll();
   
   // Create a canvas to render the mask as an image
   const tempCanvas = document.createElement('canvas');
@@ -1041,7 +1116,8 @@ function renderMaskFromRLE(rle: string, labelId: string): void {
   }
   ctx.putImageData(borderImageData, 0, 0);
   
-  // Create fabric image from the mask canvas
+  // Create fabric image from the mask canvas (RLE version)
+  // Add custom properties to identify this as a mask overlay for easy removal later
   const maskImage = new fabric.Image(tempCanvas, {
     left: fabricImg.left,
     top: fabricImg.top,
@@ -1049,7 +1125,11 @@ function renderMaskFromRLE(rle: string, labelId: string): void {
     scaleY: fabricImg.scaleY,
     selectable: false,
     evented: false,
-  });
+  }) as fabric.Image & { isMaskOverlay: boolean; maskLabelId: string };
+  
+  // Mark this object as a mask overlay so we can find and remove it later
+  maskImage.isMaskOverlay = true;
+  maskImage.maskLabelId = labelId;
   
   fabricCanvas.add(maskImage);
   fabricCanvas.moveTo(maskImage, 1); // Behind points but in front of image
@@ -1243,6 +1323,7 @@ watch(() => props.imageUrl, (newUrl) => {
     clearAllVisuals();
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
+    latestRequestByLabel.value.clear(); // Clear pending request tracking
     loadImage(newUrl);
   }
 }, { immediate: true });
@@ -1254,6 +1335,7 @@ watch(() => props.frameNumber, async () => {
     clearAllVisuals();
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
+    latestRequestByLabel.value.clear(); // Clear pending request tracking
     await loadAllExistingData();
   }
 });
