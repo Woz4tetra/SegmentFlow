@@ -326,7 +326,7 @@ class SAM3Tracker:
             )
 
         logger.info(
-            f"Preparing {actual_num_frames} frames starting at {start_frame} (frames {start_frame} to {end_frame-1})..."
+            f"Preparing {actual_num_frames} frames starting at {start_frame} (frames {start_frame} to {end_frame - 1})..."
         )
 
         # Store old temp dir to clean up later (after new one is created)
@@ -345,11 +345,14 @@ class SAM3Tracker:
                     f"No frames were created. Requested {actual_num_frames} frames starting from {start_frame}, "
                     f"but all source frames were missing or unreadable."
                 )
-            logger.info(f"Created {frames_created} frames in {self._temp_dir} (requested {actual_num_frames})")
+            logger.info(
+                f"Created {frames_created} frames in {self._temp_dir} (requested {actual_num_frames})"
+            )
 
         # Clean up old temp directory after new one is successfully created
         self._cleanup_old_temp_dir(old_temp_dir)
 
+        assert self._temp_dir is not None, "Temp directory should have been created"
         return self._temp_dir
 
     def _get_and_create_temp_dir(self) -> str | None:
@@ -388,7 +391,9 @@ class SAM3Tracker:
             Tuple of (image_path, frame_array) or None if frame cannot be loaded
         """
         if frame_idx >= len(self.image_files):
-            logger.warning(f"Frame index {frame_idx} out of range (total: {len(self.image_files)}), skipping")
+            logger.warning(
+                f"Frame index {frame_idx} out of range (total: {len(self.image_files)}), skipping"
+            )
             return None
 
         image_path = self.image_files[frame_idx]
@@ -417,8 +422,11 @@ class SAM3Tracker:
         Raises:
             ValueError: If frame cannot be read
         """
+        assert self._temp_dir is not None, "Temp directory must be created first"
         frames_created = 0
-        for local_idx, frame_idx in enumerate(tqdm(range(start_frame, end_frame), desc="Scaling frames")):
+        for local_idx, frame_idx in enumerate(
+            tqdm(range(start_frame, end_frame), desc="Scaling frames")
+        ):
             result = self._load_frame(frame_idx)
             if result is None:
                 raise ValueError(f"Cannot load frame {frame_idx}")
@@ -473,7 +481,9 @@ class SAM3Tracker:
 
         return frames_created
 
-    def _create_frame_link_or_copy(self, image_path: Path, frame: np.ndarray, local_idx: int) -> bool:
+    def _create_frame_link_or_copy(
+        self, image_path: Path, frame: np.ndarray, local_idx: int
+    ) -> bool:
         """Create a symlink or copy of a frame in the temp directory.
 
         Args:
@@ -484,6 +494,7 @@ class SAM3Tracker:
         Returns:
             True if frame was created successfully, False otherwise
         """
+        assert self._temp_dir is not None, "Temp directory must be created first"
         target_path = os.path.join(self._temp_dir, f"{local_idx:06d}.jpg")
 
         # SAM3 only supports JPEG format - must convert if not JPEG
@@ -743,7 +754,9 @@ class SAM3Tracker:
             num_frames = 1  # Only prepare the target frame
             local_idx = 0  # Target frame will be at index 0
 
-            logger.debug(f"Preparing single frame {frame_idx} for preview (will duplicate to satisfy SAM3)")
+            logger.debug(
+                f"Preparing single frame {frame_idx} for preview (will duplicate to satisfy SAM3)"
+            )
             frames_dir = self._prepare_frames_for_propagation(start, num_frames)
 
             # SAM3's init_state expects at least 3 frames, so duplicate the single frame

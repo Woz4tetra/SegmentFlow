@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class ProjectBase(BaseModel):
@@ -345,7 +345,7 @@ class SAMPointRequest(BaseModel):
 
     @field_validator("labels")
     @classmethod
-    def validate_labels(cls, v: list[int], info) -> list[int]:
+    def validate_labels(cls, v: list[int], info: ValidationInfo) -> list[int]:
         """Validate labels match points length and are 0 or 1.
 
         Args:

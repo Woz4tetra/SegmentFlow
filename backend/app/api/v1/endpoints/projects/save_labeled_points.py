@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.sam3_state import get_primary_tracker
+from app.core.sam3_tracker import SAM3Tracker
 from app.models.image import Image
 from app.models.label import Label
 from app.models.labeled_point import LabeledPoint
@@ -22,6 +23,217 @@ from app.models.project import Project
 from .shared_objects import router
 
 logger = get_logger(__name__)
+
+
+# ============================================================================
+# SAM Inference Helper Functions
+# ============================================================================
+
+
+def _get_ready_tracker() -> SAM3Tracker | None:
+    """Get the SAM3 tracker and ensure the model is loaded.
+
+    Returns:
+        SAM3Tracker if ready, None otherwise
+    """
+    tracker = get_primary_tracker()
+    if tracker is None:
+        logger.warning("SAM3 tracker not initialized, skipping mask generation")
+        return None
+
+    if tracker.model is None or tracker.predictor is None:
+        logger.warning("SAM3 model not loaded, attempting to load...")
+        try:
+            tracker.load_model()
+        except Exception as e:
+            logger.error(f"Failed to load SAM3 model: {e}")
+            return None
+
+    return tracker
+
+
+async def _fetch_project_and_image(
+    db: AsyncSession,
+    project_id: UUID,
+    frame_number: int,
+) -> tuple[Project, Image] | None:
+    """Fetch project and image from the database.
+
+    Args:
+        db: Database session
+        project_id: Project UUID
+        frame_number: Frame number (0-indexed)
+
+    Returns:
+        Tuple of (Project, Image) if found, None otherwise
+    """
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_result.scalar_one_or_none()
+    if not project:
+        logger.error(f"Project not found: {project_id}")
+        return None
+
+    image_result = await db.execute(
+        select(Image).where(
+            Image.project_id == project_id,
+            Image.frame_number == frame_number,
+        )
+    )
+    image = image_result.scalar_one_or_none()
+    if not image:
+        logger.error(f"Image not found for frame {frame_number}")
+        return None
+
+    return project, image
+
+
+def _get_inference_dir(project: Project) -> Path | None:
+    """Get the inference directory for a project.
+
+    Args:
+        project: Project model instance
+
+    Returns:
+        Path to inference directory if it exists, None otherwise
+    """
+    project_dir = Path(settings.PROJECTS_ROOT_DIR) / str(project.id)
+    inference_dir = project_dir / "inference"
+    if not inference_dir.exists():
+        logger.error(f"Inference directory not found: {inference_dir}")
+        return None
+    return inference_dir
+
+
+async def _run_sam_inference(
+    tracker: SAM3Tracker,
+    inference_dir: Path,
+    frame_number: int,
+    label_id: UUID,
+    points: list[tuple[float, float]],
+    labels: list[int],
+) -> np.ndarray | None:
+    """Run SAM single-frame inference.
+
+    Args:
+        tracker: SAM3Tracker instance
+        inference_dir: Path to inference directory
+        frame_number: Frame number (0-indexed)
+        label_id: Label UUID (used to generate obj_id)
+        points: List of (x, y) coordinate tuples (normalized 0-1)
+        labels: List of labels (1=include, 0=exclude) for each point
+
+    Returns:
+        Numpy array mask if successful, None otherwise
+    """
+    tracker.set_images_dir(str(inference_dir))
+
+    points_array = np.array(points, dtype=np.float32)
+    labels_array = np.array(labels, dtype=np.int32)
+    obj_id = hash(str(label_id)) % (2**31)  # Use positive hash as obj_id (SAM expects int32)
+
+    loop = asyncio.get_event_loop()
+    mask = await loop.run_in_executor(
+        None,
+        tracker.get_single_frame_mask,
+        frame_number,
+        obj_id,
+        points_array,
+        labels_array,
+    )
+
+    if mask is None:
+        logger.warning(f"SAM inference returned None for frame {frame_number}")
+    return mask
+
+
+def _process_mask_to_contour(
+    mask: np.ndarray,
+    frame_number: int,
+) -> tuple[list[list[int]], float] | None:
+    """Process a raw mask array into a contour polygon and area.
+
+    Args:
+        mask: Raw numpy mask array from SAM
+        frame_number: Frame number (for logging)
+
+    Returns:
+        Tuple of (contour_pixels, area) if successful, None otherwise
+    """
+    # Ensure mask is a 2D array
+    if mask.ndim > 2:
+        mask = np.squeeze(mask)
+    if mask.ndim != 2:
+        logger.warning(f"Unexpected mask shape {mask.shape}")
+        return None
+
+    # Convert mask to uint8 and ensure it's contiguous (required by OpenCV)
+    mask_uint8 = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask.astype(np.uint8)
+    mask_uint8 = np.ascontiguousarray(mask_uint8)
+
+    # Find contours using OpenCV with CHAIN_APPROX_SIMPLE to reduce point count
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        logger.warning(f"SAM mask has no contours for frame {frame_number}")
+        return None
+
+    # Take only the largest contour (avoid multiple disconnected regions)
+    largest_contour = max(contours, key=cv2.contourArea)
+
+    # Reshape contour from (n, 1, 2) to list of [x, y] pairs
+    contour_pixels = largest_contour.reshape(-1, 2).tolist()
+
+    if len(contour_pixels) < 3:
+        logger.warning(f"SAM mask contour too small for frame {frame_number}")
+        return None
+
+    area = float(cv2.contourArea(largest_contour))
+    return contour_pixels, area
+
+
+async def _save_or_update_mask(
+    db: AsyncSession,
+    image: Image,
+    label_id: UUID,
+    contour_pixels: list[list[int]],
+    area: float,
+) -> None:
+    """Save or update a mask in the database.
+
+    Args:
+        db: Database session
+        image: Image model instance
+        label_id: Label UUID
+        contour_pixels: List of [x, y] coordinate pairs
+        area: Mask area in pixels
+    """
+    existing_mask_result = await db.execute(
+        select(Mask).where(
+            Mask.image_id == image.id,
+            Mask.label_id == label_id,
+        )
+    )
+    existing_mask = existing_mask_result.scalar_one_or_none()
+
+    if existing_mask:
+        existing_mask.contour_polygon = contour_pixels
+        existing_mask.area = area
+        db.add(existing_mask)
+    else:
+        db_mask = Mask(
+            image_id=image.id,
+            label_id=label_id,
+            contour_polygon=contour_pixels,
+            area=area,
+        )
+        db.add(db_mask)
+
+    await db.commit()
+
+
+# ============================================================================
+# Main SAM Inference Function
+# ============================================================================
 
 
 async def _run_sam_inference_and_save_mask(
@@ -58,127 +270,40 @@ async def _run_sam_inference_and_save_mask(
                 labels=labels,
             )
         return False
+
     try:
-        # Get SAM3 tracker
-        tracker = get_primary_tracker()
+        # Get and validate SAM tracker
+        tracker = _get_ready_tracker()
         if tracker is None:
-            logger.warning("SAM3 tracker not initialized, skipping mask generation")
             return False
 
-        # Ensure model is loaded
-        if tracker.model is None or tracker.predictor is None:
-            logger.warning("SAM3 model not loaded, attempting to load...")
-            try:
-                tracker.load_model()
-            except Exception as e:
-                logger.error(f"Failed to load SAM3 model: {e}")
-                return False
-
-        # Get project and image
-        project_result = await db.execute(select(Project).where(Project.id == project_id))
-        project = project_result.scalar_one_or_none()
-        if not project:
-            logger.error(f"Project not found: {project_id}")
+        # Fetch project and image from database
+        result = await _fetch_project_and_image(db, project_id, frame_number)
+        if result is None:
             return False
-
-        image_result = await db.execute(
-            select(Image).where(
-                Image.project_id == project_id,
-                Image.frame_number == frame_number,
-            )
-        )
-        image = image_result.scalar_one_or_none()
-        if not image:
-            logger.error(f"Image not found for frame {frame_number}")
-            return False
+        project, image = result
 
         # Get inference directory
-        project_dir = Path(settings.PROJECTS_ROOT_DIR) / str(project.id)
-        inference_dir = project_dir / "inference"
-        if not inference_dir.exists():
-            logger.error(f"Inference directory not found: {inference_dir}")
+        inference_dir = _get_inference_dir(project)
+        if inference_dir is None:
             return False
 
-        # Set images directory for tracker
-        tracker.set_images_dir(str(inference_dir))
-
-        # Convert points and labels to numpy arrays
-        points_array = np.array(points, dtype=np.float32)
-        labels_array = np.array(labels, dtype=np.int32)
-
-        # Run single-frame inference without video context
-        # For manual labeling, we only need to segment the current frame
-        loop = asyncio.get_event_loop()
-        mask = await loop.run_in_executor(
-            None,
-            tracker.get_single_frame_mask,
-            frame_number,  # Use actual frame number from the inference directory
-            hash(str(label_id)) % (2**31),  # Use positive hash as obj_id (SAM expects int32)
-            points_array,
-            labels_array,
+        # Run SAM inference
+        mask = await _run_sam_inference(
+            tracker, inference_dir, frame_number, label_id, points, labels
         )
-
         if mask is None:
-            logger.warning(f"SAM inference returned None for frame {frame_number}")
             return False
 
-        # Ensure mask is a 2D array and contiguous in memory for OpenCV
-        if mask.ndim > 2:
-            # If mask is 3D, take the first channel or squeeze
-            mask = np.squeeze(mask)
-        if mask.ndim != 2:
-            logger.warning(f"Unexpected mask shape {mask.shape}")
+        # Process mask to contour
+        contour_result = _process_mask_to_contour(mask, frame_number)
+        if contour_result is None:
             return False
+        contour_pixels, area = contour_result
 
-        # Convert mask to uint8 and ensure it's contiguous (required by OpenCV)
-        mask_uint8 = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask.astype(np.uint8)
-        mask_uint8 = np.ascontiguousarray(mask_uint8)
+        # Save mask to database
+        await _save_or_update_mask(db, image, label_id, contour_pixels, area)
 
-        # Find contours using OpenCV with CHAIN_APPROX_SIMPLE to reduce point count
-        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        if not contours:
-            logger.warning(f"SAM mask has no contours for frame {frame_number}")
-            return False
-
-        # Take only the largest contour (avoid multiple disconnected regions)
-        largest_contour = max(contours, key=cv2.contourArea)
-
-        # Reshape contour from (n, 1, 2) to list of [x, y] pairs
-        contour_pixels = largest_contour.reshape(-1, 2).tolist()
-
-        if len(contour_pixels) < 3:
-            logger.warning(f"SAM mask contour too small for frame {frame_number}")
-            return False
-
-        # Calculate actual mask area
-        area = float(cv2.contourArea(largest_contour))
-
-        # Check if mask already exists for this label
-        existing_mask_result = await db.execute(
-            select(Mask).where(
-                Mask.image_id == image.id,
-                Mask.label_id == label_id,
-            )
-        )
-        existing_mask = existing_mask_result.scalar_one_or_none()
-
-        if existing_mask:
-            # Update existing mask
-            existing_mask.contour_polygon = contour_pixels
-            existing_mask.area = area
-            db.add(existing_mask)
-        else:
-            # Create new mask
-            db_mask = Mask(
-                image_id=image.id,
-                label_id=label_id,
-                contour_polygon=contour_pixels,
-                area=area,
-            )
-            db.add(db_mask)
-
-        await db.commit()
         logger.info(
             f"Successfully saved SAM mask for project {project_id}, "
             f"frame {frame_number}, label {label_id} with {area} pixels"
@@ -292,7 +417,7 @@ async def save_labeled_points(
         # This allows the API to return quickly while SAM processes
         # Note: We don't pass the request db session since it will be closed.
         # The background task will create its own session.
-        asyncio.create_task(
+        task = asyncio.create_task(
             _run_sam_inference_and_save_mask(
                 db=None,  # Background task will create its own session
                 project_id=project_id,
@@ -302,6 +427,8 @@ async def save_labeled_points(
                 labels=labels_list,
             )
         )
+        # Fire-and-forget: task runs in background, we don't await it
+        del task
 
         return [LabeledPointResponse.model_validate(p) for p in saved_points]
 
@@ -314,4 +441,3 @@ async def save_labeled_points(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save labeled points: {e!s}",
         ) from e
-

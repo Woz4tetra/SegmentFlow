@@ -1,6 +1,6 @@
 """Mask database model."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import JSON, Float, ForeignKey
@@ -28,7 +28,8 @@ class Mask(BaseModel):
         nullable=False,
         index=True,
     )
-    contour_polygon: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # contour_polygon is a list of [x, y] coordinate pairs stored as JSON
+    contour_polygon: Mapped[list[list[Any]]] = mapped_column(JSON, nullable=False)
     area: Mapped[float] = mapped_column(Float, nullable=False)
 
     image: Mapped["Image"] = relationship("Image", back_populates="masks")

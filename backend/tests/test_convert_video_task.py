@@ -38,10 +38,10 @@ def mock_project_dirs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 class TestConvertVideoTask:
     """Tests for convert_video_task background function."""
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_success(
         self,
         mock_create_engine: Mock,
@@ -116,8 +116,8 @@ class TestConvertVideoTask:
         # Clean up progress tracking
         del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_conversion_error(
         self,
         mock_generate_thumbnail: Mock,
@@ -157,8 +157,8 @@ class TestConvertVideoTask:
         # Clean up progress tracking
         del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_thumbnail_error(
         self,
         mock_generate_thumbnail: Mock,
@@ -204,8 +204,8 @@ class TestConvertVideoTask:
         # Clean up progress tracking
         del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_no_frames(
         self,
         mock_generate_thumbnail: Mock,
@@ -246,9 +246,9 @@ class TestConvertVideoTask:
         # Clean up progress tracking
         del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_database_error(
         self,
         mock_create_engine: Mock,
@@ -296,10 +296,10 @@ class TestConvertVideoTask:
         if project_id_str in conversion_progress:
             del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_progress_callback(
         self,
         mock_create_engine: Mock,
@@ -365,10 +365,10 @@ class TestConvertVideoTask:
         # Clean up progress tracking
         del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_image_record_fields(
         self,
         mock_create_engine: Mock,

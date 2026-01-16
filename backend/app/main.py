@@ -1,6 +1,7 @@
 """FastAPI main application entry point."""
 
 import inspect
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,9 @@ from app.core.sam3_tracker import SAM3Tracker
 
 logger = get_logger(__name__)
 
+# Environment variable to skip SAM3 loading (for faster tests)
+SKIP_SAM3_INIT = os.environ.get("SEGMENTFLOW_SKIP_SAM3", "").lower() in ("1", "true", "yes")
+
 
 def _initialize_sam3() -> tuple[SAM3Tracker | None, dict[int, SAM3Tracker]]:
     """Initialize SAM3 models for all available GPUs.
@@ -27,6 +31,11 @@ def _initialize_sam3() -> tuple[SAM3Tracker | None, dict[int, SAM3Tracker]]:
         - Primary tracker instance (GPU 0) or None if failed
         - Dict of all tracker instances by GPU ID
     """
+    # Skip SAM3 initialization if disabled (for faster tests)
+    if SKIP_SAM3_INIT:
+        logger.info("SAM3 initialization skipped (SEGMENTFLOW_SKIP_SAM3=1)")
+        return None, {}
+
     try:
         logger.info("Initializing SAM3 model...")
 
