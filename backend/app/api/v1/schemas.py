@@ -549,3 +549,154 @@ class SAMQueueStatusResponse(BaseModel):
     queue_size: int = Field(..., ge=0, description="Requests in queue")
     processing: bool = Field(..., description="Whether processing active")
     estimated_wait_ms: float = Field(..., ge=0, description="Estimated wait time")
+
+
+# ===== Propagation Schemas (PROP-001) =====
+
+
+class PropagationPointData(BaseModel):
+    """Data class for a labeled point used in propagation.
+
+    Attributes:
+        x: Normalized x coordinate [0, 1]
+        y: Normalized y coordinate [0, 1]
+        include: Whether this is an include (positive) or exclude (negative) point
+    """
+
+    x: float = Field(..., ge=0, le=1, description="Normalized x coordinate")
+    y: float = Field(..., ge=0, le=1, description="Normalized y coordinate")
+    include: bool = Field(True, description="Include (positive) or exclude (negative) point")
+
+
+class PropagationLabelData(BaseModel):
+    """Data class for a label's points in a propagation source frame.
+
+    Attributes:
+        label_id: UUID of the label
+        label_name: Name of the label for display purposes
+        color_hex: Color in #RRGGBB format
+        points: List of labeled points for this label
+    """
+
+    label_id: UUID = Field(..., description="Label UUID")
+    label_name: str = Field(..., description="Label name")
+    color_hex: str = Field(..., description="Color in #RRGGBB format")
+    points: list[PropagationPointData] = Field(..., description="Points for this label")
+
+
+class PropagationSourceFrame(BaseModel):
+    """Data class for a manually labeled frame used as propagation source.
+
+    Attributes:
+        frame_number: Frame number in the video
+        image_id: UUID of the image
+        labels: List of labels with their points for this frame
+    """
+
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    image_id: UUID = Field(..., description="Image UUID")
+    labels: list[PropagationLabelData] = Field(..., description="Labels with points")
+
+
+class PropagationSegment(BaseModel):
+    """Data class for a propagation segment between two source frames.
+
+    Attributes:
+        start_frame: Starting frame number (inclusive)
+        end_frame: Ending frame number (inclusive)
+        source_frame: The manually labeled frame to propagate from
+        direction: 'forward' or 'backward' propagation direction
+        num_frames: Total number of frames in this segment
+    """
+
+    start_frame: int = Field(..., ge=0, description="Start frame (inclusive)")
+    end_frame: int = Field(..., ge=0, description="End frame (inclusive)")
+    source_frame: int = Field(..., ge=0, description="Source frame to propagate from")
+    direction: str = Field(..., description="'forward' or 'backward'")
+    num_frames: int = Field(..., ge=1, description="Number of frames in segment")
+
+
+class PropagationRequest(BaseModel):
+    """Schema for starting a propagation job.
+
+    Attributes:
+        project_id: UUID of the project to propagate labels for
+        max_propagation_length: Optional override for max frames per segment
+    """
+
+    project_id: UUID = Field(..., description="Project UUID")
+    max_propagation_length: int | None = Field(
+        None,
+        gt=0,
+        description="Max frames per segment (uses config default if not specified)",
+    )
+
+
+class PropagationJobResponse(BaseModel):
+    """Schema for propagation job creation response.
+
+    Attributes:
+        job_id: Unique identifier for the propagation job
+        project_id: UUID of the project
+        status: Job status (queued, running, completed, failed)
+        total_segments: Total number of segments to propagate
+        total_frames: Total number of frames to process
+        message: Status message
+    """
+
+    job_id: str = Field(..., description="Unique job identifier")
+    project_id: UUID = Field(..., description="Project UUID")
+    status: str = Field(..., description="Job status")
+    total_segments: int = Field(..., ge=0, description="Total segments to propagate")
+    total_frames: int = Field(..., ge=0, description="Total frames to process")
+    message: str = Field(..., description="Status message")
+
+
+class PropagationProgressUpdate(BaseModel):
+    """Schema for propagation progress WebSocket updates.
+
+    Attributes:
+        job_id: Unique identifier for the propagation job
+        project_id: UUID of the project
+        status: Current job status (running, completed, failed)
+        current_segment: Current segment being processed (1-indexed)
+        total_segments: Total number of segments
+        current_frame: Current frame being processed
+        frames_completed: Total frames completed so far
+        total_frames: Total frames to process
+        progress_percent: Overall progress as percentage (0-100)
+        estimated_remaining_ms: Estimated time remaining in milliseconds
+        error: Error message if status is 'failed'
+    """
+
+    job_id: str = Field(..., description="Unique job identifier")
+    project_id: UUID = Field(..., description="Project UUID")
+    status: str = Field(..., description="Job status: running, completed, failed")
+    current_segment: int = Field(..., ge=0, description="Current segment (1-indexed)")
+    total_segments: int = Field(..., ge=0, description="Total segments")
+    current_frame: int = Field(..., ge=0, description="Current frame being processed")
+    frames_completed: int = Field(..., ge=0, description="Frames completed")
+    total_frames: int = Field(..., ge=0, description="Total frames to process")
+    progress_percent: float = Field(..., ge=0, le=100, description="Progress percentage")
+    estimated_remaining_ms: float = Field(..., ge=0, description="Estimated time remaining")
+    error: str | None = Field(None, description="Error message if failed")
+
+
+class PropagationStatusResponse(BaseModel):
+    """Schema for querying propagation job status.
+
+    Attributes:
+        job_id: Unique identifier for the propagation job
+        project_id: UUID of the project
+        status: Current job status
+        progress: Current progress update
+        started_at: Job start timestamp
+        completed_at: Job completion timestamp (if completed)
+    """
+
+    job_id: str = Field(..., description="Unique job identifier")
+    project_id: UUID = Field(..., description="Project UUID")
+    status: str = Field(..., description="Job status")
+    progress: PropagationProgressUpdate | None = Field(None, description="Current progress")
+    started_at: datetime | None = Field(None, description="Job start time")
+    completed_at: datetime | None = Field(None, description="Job completion time")

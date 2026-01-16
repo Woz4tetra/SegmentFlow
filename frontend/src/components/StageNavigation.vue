@@ -58,8 +58,8 @@ const stages: Stage[] = [
   { id: 'trim', name: 'Trim', route: 'Trim' },
   { id: 'manual_labeling', name: 'Manual Label', route: 'ManualLabeling' },
   { id: 'propagation', name: 'Propagate', route: 'Propagation' },
-  { id: 'validation', name: 'Validation', route: 'Upload' },
-  { id: 'export', name: 'Export', route: 'Upload' },
+  { id: 'validation', name: 'Validation', route: 'ManualLabeling' },
+  { id: 'export', name: 'Export', route: 'Home' },
 ];
 
 const currentStage = computed(() => props.project.stage);

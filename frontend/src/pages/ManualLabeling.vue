@@ -25,6 +25,15 @@
 
     <div v-else class="content-wrapper">
       <div class="labeling-container" :class="{ 'sidebar-hidden': !sidebarVisible }">
+      <!-- Frame Status Slider (PROP-UI-004) -->
+      <div class="slider-wrapper">
+        <FrameStatusSlider 
+          :images="imagesWithMaskStatus"
+          :current-frame="currentFrameNumber"
+          :total-frames="totalFrames"
+          @frame-click="goToFrameFromSlider"
+        />
+      </div>
       <!-- Image Viewer -->
       <div class="viewer-section">
         <ImageViewer 
@@ -75,113 +84,146 @@
 
       <!-- Control Panel -->
       <div v-if="sidebarVisible" class="control-panel">
-        <!-- Frame Navigation -->
-        <div class="control-section">
-          <h3>Frame Navigation</h3>
-          
-          <!-- Jump to frame input -->
-          <div class="frame-nav">
-            <input 
-              type="number" 
-              v-model.number="frameInput" 
-              @keyup.enter="goToFrame"
-              placeholder="Go to frame"
-              class="frame-input"
-            />
-            <button @click="goToFrame" class="btn-go">Go</button>
-          </div>
-          
-          <!-- Primary navigation buttons -->
-          <div class="nav-buttons-primary">
-            <button @click="previousFrame" class="btn-nav btn-nav-prev" title="Previous frame (← or A)">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M15 19l-7-7 7-7"/>
-              </svg>
-              Previous
-              <span class="hotkey">← A</span>
-            </button>
-            <button @click="nextFrame" class="btn-nav btn-nav-next" title="Next frame (→ or D)">
-              Next
-              <span class="hotkey">→ D</span>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </div>
-          
-          <!-- Secondary navigation buttons -->
-          <div class="nav-buttons-secondary">
-            <button @click="previousLabeledFrame" class="btn-sm" title="Previous labeled frame (Q)">
-              ⤎ Prev Labeled <span class="hotkey">Q</span>
-            </button>
-            <button @click="nextLabeledFrame" class="btn-sm" title="Next labeled frame (E)">
-              Next Labeled ⤏ <span class="hotkey">E</span>
-            </button>
-          </div>
-          
-          <!-- Big jump button -->
-          <button @click="bigJump" class="btn-sm btn-jump" title="Jump forward (N)">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
-            </svg>
-            Jump +{{ bigJumpSize }} <span class="hotkey">N</span>
-          </button>
-        </div>
-
-        <!-- Frame Info -->
-        <div class="control-section">
-          <h3>Current Frame</h3>
-          <div class="frame-info">
-            <div class="frame-info-row">
-              <span>Frame Number</span>
-              <strong>{{ currentFrameNumber }} / {{ totalFrames }}</strong>
+        <!-- Left Column: Navigation & Propagation -->
+        <div class="control-column">
+          <!-- Frame Navigation -->
+          <div class="control-section">
+            <h3>Frame Navigation</h3>
+            
+            <!-- Jump to frame input -->
+            <div class="frame-nav">
+              <input 
+                type="number" 
+                v-model.number="frameInput" 
+                @keyup.enter="goToFrame"
+                placeholder="Go to frame"
+                class="frame-input"
+              />
+              <button @click="goToFrame" class="btn-go">Go</button>
             </div>
-            <div class="frame-info-row">
-              <span>Status</span>
-              <strong class="status-badge">{{ frameStatus }}</strong>
+            
+            <!-- Primary navigation buttons -->
+            <div class="nav-buttons-primary">
+              <button @click="previousFrame" class="btn-nav btn-nav-prev" title="Previous frame (← or A)">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M15 19l-7-7 7-7"/>
+                </svg>
+                Previous
+                <span class="hotkey">← A</span>
+              </button>
+              <button @click="nextFrame" class="btn-nav btn-nav-next" title="Next frame (→ or D)">
+                Next
+                <span class="hotkey">→ D</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
             </div>
+            
+            <!-- Secondary navigation buttons -->
+            <div class="nav-buttons-secondary">
+              <button @click="previousLabeledFrame" class="btn-sm" title="Previous labeled frame (Q)">
+                ⤎ Prev Labeled <span class="hotkey">Q</span>
+              </button>
+              <button @click="nextLabeledFrame" class="btn-sm" title="Next labeled frame (E)">
+                Next Labeled ⤏ <span class="hotkey">E</span>
+              </button>
+            </div>
+            
+            <!-- Big jump button -->
+            <button @click="bigJump" class="btn-sm btn-jump" title="Jump forward (N)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+              Jump +{{ bigJumpSize }} <span class="hotkey">N</span>
+            </button>
           </div>
-        </div>
 
-        <!-- Label Selection -->
-        <div class="control-section">
-          <div class="section-header">
-            <h3>Active Label</h3>
-            <span class="section-hint"><kbd>T</kbd> cycle</span>
-          </div>
-          <div v-if="labels.length === 0" class="no-labels">
-            <p>No labels available</p>
-            <p class="hint">Create labels in the Labels page first</p>
-          </div>
-          <div v-else class="label-selector">
-            <div 
-              v-for="label in labels" 
-              :key="label.id"
-              @click="selectLabel(label)"
-              @mouseenter="hoveredLabelId = label.id"
-              @mouseleave="hoveredLabelId = null"
-              :class="['label-option', { active: selectedLabel?.id === label.id }]"
-            >
-              <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
-              <span class="label-name">{{ label.name }}</span>
-              <!-- CANVAS-006: Thumbnail preview on hover -->
-              <div 
-                v-if="hoveredLabelId === label.id && label.thumbnail_path" 
-                class="label-thumbnail-preview"
-              >
-                <img 
-                  :src="label.thumbnail_path" 
-                  :alt="`${label.name} thumbnail`"
-                  @error="handleThumbnailError"
-                />
+          <!-- Frame Info -->
+          <div class="control-section">
+            <h3>Current Frame</h3>
+            <div class="frame-info">
+              <div class="frame-info-row">
+                <span>Frame Number</span>
+                <strong>{{ currentFrameNumber }} / {{ totalFrames }}</strong>
+              </div>
+              <div class="frame-info-row">
+                <span>Status</span>
+                <strong class="status-badge">{{ frameStatus }}</strong>
               </div>
             </div>
           </div>
-          <div v-if="selectedLabel" class="mode-info">
-            <p class="mode-label">Click Mode:</p>
-            <p class="mode-keys">
-              <kbd>I</kbd> Include • <kbd>U</kbd> Exclude
+
+          <!-- Auto Label Section (PROP-UI-003) -->
+          <div class="control-section auto-label-section">
+            <h3>Propagation</h3>
+            <p class="section-description">
+              Automatically propagate labels to all frames using SAM3.
             </p>
+            <div class="labeled-frames-info" v-if="labeledFrameCount > 0">
+              <span class="info-icon">✓</span>
+              <span>{{ labeledFrameCount }} frame{{ labeledFrameCount !== 1 ? 's' : '' }} labeled</span>
+            </div>
+            <div class="labeled-frames-info warning" v-else>
+              <span class="info-icon">!</span>
+              <span>Label at least 1 frame first</span>
+            </div>
+            <button 
+              @click="goToPropagation"
+              class="btn-auto-label"
+              :disabled="labeledFrameCount === 0"
+              :title="labeledFrameCount === 0 ? 'Label at least one frame first' : 'Start automatic label propagation'"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5,3 19,12 5,21" fill="currentColor" stroke="none" />
+              </svg>
+              Prepare Auto Labeling
+            </button>
+          </div>
+        </div>
+
+        <!-- Right Column: Label Selection -->
+        <div class="control-column">
+          <div class="control-section">
+            <div class="section-header">
+              <h3>Active Label</h3>
+              <span class="section-hint"><kbd>T</kbd> cycle</span>
+            </div>
+            <div v-if="labels.length === 0" class="no-labels">
+              <p>No labels available</p>
+              <p class="hint">Create labels in the Labels page first</p>
+            </div>
+            <div v-else class="label-selector">
+              <div 
+                v-for="label in labels" 
+                :key="label.id"
+                @click="selectLabel(label)"
+                @mouseenter="hoveredLabelId = label.id"
+                @mouseleave="hoveredLabelId = null"
+                :class="['label-option', { active: selectedLabel?.id === label.id }]"
+              >
+                <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
+                <span class="label-name">{{ label.name }}</span>
+                <!-- CANVAS-006: Thumbnail preview on hover -->
+                <div 
+                  v-if="hoveredLabelId === label.id && label.thumbnail_path" 
+                  class="label-thumbnail-preview"
+                >
+                  <img 
+                    :src="label.thumbnail_path" 
+                    :alt="`${label.name} thumbnail`"
+                    @error="handleThumbnailError"
+                  />
+                </div>
+              </div>
+            </div>
+            <div v-if="selectedLabel" class="mode-info">
+              <p class="mode-label">Click Mode:</p>
+              <div class="mode-keys">
+                <span class="mode-key"><kbd>I</kbd> Include</span>
+                <span class="mode-key"><kbd>U</kbd> Exclude</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -196,6 +238,7 @@ import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import StageNavigation from '../components/StageNavigation.vue';
 import ImageViewer from '../components/ImageViewer.vue';
+import FrameStatusSlider from '../components/FrameStatusSlider.vue';
 
 interface Project {
   id: string;
@@ -217,6 +260,7 @@ interface ImageData {
   status: string;
   manually_labeled: boolean;
   validation: string;
+  has_mask?: boolean;
 }
 
 interface Label {
@@ -285,6 +329,22 @@ const frameStatus = computed(() => {
   
   return 'Unknown';
 });
+
+// Count of labeled frames for Auto Label button (PROP-UI-003)
+const labeledFrameCount = computed(() => {
+  return images.value.filter(img => img.manually_labeled).length;
+});
+
+// Images with mask status for the slider (PROP-UI-004)
+const imagesWithMaskStatus = computed(() => {
+  return images.value.map(img => ({
+    ...img,
+    has_mask: maskStatusByFrame.value.get(img.frame_number) ?? false,
+  }));
+});
+
+// Track which frames have masks (for slider display)
+const maskStatusByFrame = ref<Map<number, boolean>>(new Map());
 
 async function fetchProject(): Promise<void> {
   try {
@@ -468,6 +528,54 @@ function bigJump(): void {
   }
 }
 
+// PROP-UI-003: Navigate to propagation page
+async function goToPropagation(): Promise<void> {
+  if (labeledFrameCount.value === 0) return;
+  
+  try {
+    // Mark propagation stage as visited before navigating
+    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=propagation`);
+    project.value = data;
+  } catch (error) {
+    console.error('Failed to mark propagation stage as visited:', error);
+  }
+  
+  router.push({ name: 'Propagation', params: { id: projectId } });
+}
+
+// PROP-UI-004: Navigate to frame from slider click
+function goToFrameFromSlider(frameNumber: number): void {
+  currentFrameNumber.value = frameNumber;
+}
+
+// PROP-UI-004: Fetch mask status for all frames (called after initial load and propagation)
+async function fetchMaskStatus(): Promise<void> {
+  try {
+    // Fetch masks for a sample of frames to determine which have propagated masks
+    // In production, this would ideally be a batch endpoint
+    const statusMap = new Map<number, boolean>();
+    
+    // Check masks for each image (non-manually-labeled ones)
+    for (const img of images.value) {
+      if (!img.manually_labeled) {
+        try {
+          const response = await api.get(`/projects/${projectId}/frames/${img.frame_number}/masks`);
+          statusMap.set(img.frame_number, response.data && response.data.length > 0);
+        } catch {
+          statusMap.set(img.frame_number, false);
+        }
+      } else {
+        // Manually labeled frames always have masks
+        statusMap.set(img.frame_number, true);
+      }
+    }
+    
+    maskStatusByFrame.value = statusMap;
+  } catch (error) {
+    console.error('Failed to fetch mask status:', error);
+  }
+}
+
 function handleKeyDown(event: KeyboardEvent): void {
   // Don't handle shortcuts if user is typing in an input
   if (event.target instanceof HTMLInputElement) {
@@ -528,6 +636,10 @@ onMounted(async () => {
     
     // Load images, labels, and settings from backend
     await Promise.all([fetchImages(), fetchLabels(), fetchSettings()]);
+    
+    // PROP-UI-004: Fetch mask status for slider display
+    // Do this after images are loaded, but don't block the UI
+    fetchMaskStatus();
   } catch (error) {
     console.error('Failed during initialization:', error);
   }
@@ -629,17 +741,23 @@ h1 {
 
 .labeling-container {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr 420px;
+  grid-template-rows: auto 1fr;
   gap: 1.5rem;
   padding: 0;
   width: 100%;
-  max-width: 1400px;
+  max-width: 1600px;
   transition: grid-template-columns 0.3s ease;
 }
 
 .labeling-container.sidebar-hidden {
   grid-template-columns: 1fr;
   max-width: 100%;
+}
+
+/* PROP-UI-004: Slider wrapper spans full width */
+.slider-wrapper {
+  grid-column: 1 / -1;
 }
 
 .viewer-section {
@@ -704,16 +822,23 @@ h1 {
 }
 
 .control-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  height: fit-content;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  align-items: start;
+}
+
+.control-column {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
   padding: 1.25rem;
   background: var(--surface, #ffffff);
   border: 1px solid var(--border, #dfe3ec);
   border-radius: 16px;
-  height: fit-content;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .control-section {
@@ -1130,7 +1255,14 @@ h1 {
   color: var(--text, #0f172a);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+}
+
+.mode-key {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
 }
 
 .mode-keys kbd {
@@ -1178,9 +1310,24 @@ h1 {
   stroke-width: 2;
 }
 
+@media (max-width: 1400px) {
+  .labeling-container {
+    grid-template-columns: 1fr 380px;
+  }
+}
+
 @media (max-width: 1200px) {
   .labeling-container {
-    grid-template-columns: 1fr 280px;
+    grid-template-columns: 1fr 340px;
+  }
+  
+  .control-panel {
+    grid-template-columns: 1fr;
+  }
+  
+  .control-column:last-child {
+    border-top: 1px solid var(--border, #e5e7eb);
+    padding-top: 1rem;
   }
 }
 
@@ -1191,6 +1338,76 @@ h1 {
   
   .control-panel {
     order: -1;
+    grid-template-columns: 1fr;
   }
+}
+
+/* PROP-UI-003: Auto Label Section Styles */
+.auto-label-section {
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 1rem;
+}
+
+.section-description {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted, #6b7280);
+  line-height: 1.5;
+}
+
+.labeled-frames-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #16a34a;
+}
+
+.labeled-frames-info.warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05));
+  color: #d97706;
+}
+
+.info-icon {
+  font-weight: 700;
+}
+
+.btn-auto-label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.2rem;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.25);
+}
+
+.btn-auto-label:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.35);
+}
+
+.btn-auto-label:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--surface-muted, #9ca3af);
+  box-shadow: none;
+}
+
+.btn-auto-label svg {
+  flex-shrink: 0;
 }
 </style>

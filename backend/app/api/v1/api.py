@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health, labels, projects, sam3
+from app.api.v1.endpoints import health, labels, projects, propagation, sam3
 
 api_router = APIRouter()
 
@@ -11,3 +11,4 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(sam3.router, tags=["sam3"])
 api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(labels.router, tags=["labels"])
+api_router.include_router(propagation.router, tags=["propagation"])
