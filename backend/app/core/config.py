@@ -91,9 +91,9 @@ class Settings(BaseSettings):
     )
 
     # SAM configuration
-    SAM_MODEL_PATH: str | None = Field(
+    SAM_MAX_NUM_GPUS: int | None = Field(
         default=None,
-        description="Path to SAM model checkpoint",
+        description="Maximum number of GPUs to use for parallel SAM3 propagation. If not set, uses all available GPUs detected by pynvml. Set to 0 for CPU-only.",
     )
 
     # Processing configuration
@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     )
     INFERENCE_WIDTH: int = Field(
         default=1024,
-        description="Width for SAM inference images",
+        description="Width for SAM inference images (smaller = faster, less memory)",
     )
     OUTPUT_WIDTH: int = Field(
         default=1920,

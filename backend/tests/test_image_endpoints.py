@@ -209,7 +209,7 @@ class TestGetFrameImage:
         mock_root = create_mock_frame_files(str(test_project.id))
 
         with patch(
-            "app.api.v1.endpoints.projects.settings.PROJECTS_ROOT_DIR",
+            "app.api.v1.endpoints.projects.get_frame_image.settings.PROJECTS_ROOT_DIR",
             str(mock_root),
         ):
             response = await client.get(f"/api/v1/projects/{test_project.id}/frames/0")
@@ -234,7 +234,7 @@ class TestGetFrameImage:
         mock_root = create_mock_frame_files(str(test_project.id))
 
         with patch(
-            "app.api.v1.endpoints.projects.settings.PROJECTS_ROOT_DIR",
+            "app.api.v1.endpoints.projects.get_frame_image.settings.PROJECTS_ROOT_DIR",
             str(mock_root),
         ):
             for frame_num in [0, 2, 4]:
@@ -259,7 +259,7 @@ class TestGetFrameImage:
         mock_root = create_mock_frame_files(str(test_project.id))
 
         with patch(
-            "app.api.v1.endpoints.projects.settings.PROJECTS_ROOT_DIR",
+            "app.api.v1.endpoints.projects.get_frame_image.settings.PROJECTS_ROOT_DIR",
             str(mock_root),
         ):
             response = await client.get(f"/api/v1/projects/{test_project.id}/frames/999")
@@ -281,7 +281,7 @@ class TestGetFrameImage:
         fake_id = str(uuid4())
 
         with patch(
-            "app.api.v1.endpoints.projects.settings.PROJECTS_ROOT_DIR",
+            "app.api.v1.endpoints.projects.get_frame_image.settings.PROJECTS_ROOT_DIR",
             str(tmp_path),
         ):
             response = await client.get(f"/api/v1/projects/{fake_id}/frames/0")
@@ -317,7 +317,7 @@ class TestGetFrameImage:
         mock_root = create_mock_frame_files(str(test_project.id))
 
         with patch(
-            "app.api.v1.endpoints.projects.settings.PROJECTS_ROOT_DIR",
+            "app.api.v1.endpoints.projects.get_frame_image.settings.PROJECTS_ROOT_DIR",
             str(mock_root),
         ):
             response = await client.get(f"/api/v1/projects/{test_project.id}/frames/-1")

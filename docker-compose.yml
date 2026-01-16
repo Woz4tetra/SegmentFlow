@@ -55,14 +55,30 @@ services:
       ENVIRONMENT: development
       DEBUG: "True"
       CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "http://frontend:5173"]'
+      # Set Hugging Face home to use mounted cache
+      HF_HOME: /root/.cache/huggingface
+      # HuggingFace token for accessing gated models like SAM3
+      # Set this in your .env file: HF_TOKEN=your_token_here
+      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      # Cache SAM3 model from Hugging Face (mount local cache)
+      - ./backend/data/models:/root/.cache/huggingface/hub
+      # Cache PyTorch models
+      - torch_cache:/root/.cache/torch
     networks:
       - segmentflow-network
     secrets:
       - postgres_password
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -82,6 +98,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  torch_cache:
 
 networks:
   segmentflow-network:

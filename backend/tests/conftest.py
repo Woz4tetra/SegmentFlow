@@ -17,6 +17,10 @@ from app.models.mask import Mask
 from app.models.project import Project
 from app.models.stats import Stats
 
+# Skip SAM3 initialization during tests for speed
+# This must be set BEFORE importing app.main
+os.environ["SEGMENTFLOW_SKIP_SAM3"] = "1"
+
 
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[AsyncClient]:

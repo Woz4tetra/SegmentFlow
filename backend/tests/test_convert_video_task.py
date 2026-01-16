@@ -7,7 +7,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.projects import _conversion_progress, convert_video_task
+from app.api.v1.endpoints.projects.complete_video_upload import convert_video_task
+from app.api.v1.endpoints.projects.shared_objects import conversion_progress
 from app.core.config import settings
 from app.models.image import ImageStatus, ValidationStatus
 
@@ -37,10 +38,10 @@ def mock_project_dirs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 class TestConvertVideoTask:
     """Tests for convert_video_task background function."""
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_success(
         self,
         mock_create_engine: Mock,
@@ -91,8 +92,8 @@ class TestConvertVideoTask:
 
         # Verify progress tracking was initialized
         project_id_str = str(project_id)
-        assert project_id_str in _conversion_progress
-        assert _conversion_progress[project_id_str]["error"] is False
+        assert project_id_str in conversion_progress
+        assert conversion_progress[project_id_str]["error"] is False
 
         # Verify video conversion was called
         mock_convert_video.assert_called_once()
@@ -113,10 +114,10 @@ class TestConvertVideoTask:
         mock_session.commit.assert_called_once()
 
         # Clean up progress tracking
-        del _conversion_progress[project_id_str]
+        del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_conversion_error(
         self,
         mock_generate_thumbnail: Mock,
@@ -147,17 +148,17 @@ class TestConvertVideoTask:
 
         # Verify error was recorded
         project_id_str = str(project_id)
-        assert project_id_str in _conversion_progress
-        assert _conversion_progress[project_id_str]["error"] is True
+        assert project_id_str in conversion_progress
+        assert conversion_progress[project_id_str]["error"] is True
 
         # Verify thumbnail and database operations were not attempted
         mock_generate_thumbnail.assert_not_called()
 
         # Clean up progress tracking
-        del _conversion_progress[project_id_str]
+        del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_thumbnail_error(
         self,
         mock_generate_thumbnail: Mock,
@@ -197,14 +198,14 @@ class TestConvertVideoTask:
 
         # Verify error was recorded
         project_id_str = str(project_id)
-        assert project_id_str in _conversion_progress
-        assert _conversion_progress[project_id_str]["error"] is True
+        assert project_id_str in conversion_progress
+        assert conversion_progress[project_id_str]["error"] is True
 
         # Clean up progress tracking
-        del _conversion_progress[project_id_str]
+        del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     def test_convert_video_task_no_frames(
         self,
         mock_generate_thumbnail: Mock,
@@ -240,14 +241,14 @@ class TestConvertVideoTask:
 
         # Verify error flag is not set (no frames is a warning, not an error)
         project_id_str = str(project_id)
-        assert project_id_str in _conversion_progress
+        assert project_id_str in conversion_progress
 
         # Clean up progress tracking
-        del _conversion_progress[project_id_str]
+        del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_database_error(
         self,
         mock_create_engine: Mock,
@@ -292,13 +293,13 @@ class TestConvertVideoTask:
 
         # Clean up progress tracking
         project_id_str = str(project_id)
-        if project_id_str in _conversion_progress:
-            del _conversion_progress[project_id_str]
+        if project_id_str in conversion_progress:
+            del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_progress_callback(
         self,
         mock_create_engine: Mock,
@@ -357,17 +358,17 @@ class TestConvertVideoTask:
 
         # Verify progress tracking was updated
         project_id_str = str(project_id)
-        assert project_id_str in _conversion_progress
-        assert _conversion_progress[project_id_str]["saved"] == 10
-        assert _conversion_progress[project_id_str]["total"] == 10
+        assert project_id_str in conversion_progress
+        assert conversion_progress[project_id_str]["saved"] == 10
+        assert conversion_progress[project_id_str]["total"] == 10
 
         # Clean up progress tracking
-        del _conversion_progress[project_id_str]
+        del conversion_progress[project_id_str]
 
-    @patch("app.api.v1.endpoints.projects.convert_video_to_jpegs")
-    @patch("app.api.v1.endpoints.projects.generate_thumbnail")
-    @patch("app.api.v1.endpoints.projects.Session")
-    @patch("app.api.v1.endpoints.projects.create_engine")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.create_engine")
     def test_convert_video_task_image_record_fields(
         self,
         mock_create_engine: Mock,
@@ -442,5 +443,5 @@ class TestConvertVideoTask:
 
         # Clean up progress tracking
         project_id_str = str(project_id)
-        if project_id_str in _conversion_progress:
-            del _conversion_progress[project_id_str]
+        if project_id_str in conversion_progress:
+            del conversion_progress[project_id_str]

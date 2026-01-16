@@ -20,6 +20,7 @@ FRONTEND_DIR="${SCRIPT_DIR}/../frontend"
 TARGET="${1:-all}"
 FAILED=0
 PASSED=0
+export SEGMENTFLOW_SKIP_SAM3=true
 
 # Print section headers
 print_header() {

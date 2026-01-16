@@ -105,7 +105,7 @@ def convert_video_to_jpegs(
         cap.release()
 
     if progress_callback:
-        progress_callback(saved, total)
+        progress_callback(total, total)
 
     return did_error_occur
 

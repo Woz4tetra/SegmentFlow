@@ -1,7 +1,7 @@
 <template>
-  <div class="manual-labeling-page">
+  <div class="manual-labeling-page" :class="{ 'fullscreen': !sidebarVisible }">
     <!-- Stage Navigation -->
-    <StageNavigation v-if="project" :project="project" />
+    <StageNavigation v-if="project && sidebarVisible" :project="project" />
 
     <section class="hero">
       <router-link :to="{ name: 'Home' }" class="ghost btn-icon" title="Back to Projects">
@@ -24,14 +24,21 @@
     </div>
 
     <div v-else class="content-wrapper">
-      <div class="labeling-container">
+      <div class="labeling-container" :class="{ 'sidebar-hidden': !sidebarVisible }">
       <!-- Image Viewer -->
       <div class="viewer-section">
         <ImageViewer 
+          ref="imageViewerRef"
           v-if="currentImage"
           :image-url="currentImageUrl"
           :width="viewerWidth"
           :height="viewerHeight"
+          :project-id="projectId"
+          :frame-number="currentFrameNumber"
+          :selected-label-id="selectedLabel?.id"
+          :selected-label-color="selectedLabel?.color_hex || '#2563eb'"
+          :labels="labels"
+          @frame-labeled="onFrameLabeled"
         />
         <div v-else class="no-image">
           No images available. Please complete the trim stage first.
@@ -39,6 +46,19 @@
 
         <!-- Viewer Controls -->
         <div class="viewer-controls">
+          <button 
+            @click="toggleSidebar" 
+            class="control-btn"
+            :title="sidebarVisible ? 'Hide sidebar (F)' : 'Show sidebar (F)'"
+          >
+            <svg v-if="sidebarVisible" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18l-6-6 6-6M21 18l-6-6 6-6" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 18l6-6-6-6M3 18l6-6-6-6" />
+            </svg>
+            {{ sidebarVisible ? 'Hide Sidebar' : 'Show Sidebar' }} <span class="hotkey">F</span>
+          </button>
           <button 
             @click="resetView" 
             class="control-btn"
@@ -54,7 +74,7 @@
       </div>
 
       <!-- Control Panel -->
-      <div class="control-panel">
+      <div v-if="sidebarVisible" class="control-panel">
         <!-- Frame Navigation -->
         <div class="control-section">
           <h3>Frame Navigation</h3>
@@ -122,6 +142,48 @@
             </div>
           </div>
         </div>
+
+        <!-- Label Selection -->
+        <div class="control-section">
+          <div class="section-header">
+            <h3>Active Label</h3>
+            <span class="section-hint"><kbd>T</kbd> cycle</span>
+          </div>
+          <div v-if="labels.length === 0" class="no-labels">
+            <p>No labels available</p>
+            <p class="hint">Create labels in the Labels page first</p>
+          </div>
+          <div v-else class="label-selector">
+            <div 
+              v-for="label in labels" 
+              :key="label.id"
+              @click="selectLabel(label)"
+              @mouseenter="hoveredLabelId = label.id"
+              @mouseleave="hoveredLabelId = null"
+              :class="['label-option', { active: selectedLabel?.id === label.id }]"
+            >
+              <div class="label-color" :style="{ backgroundColor: label.color_hex }"></div>
+              <span class="label-name">{{ label.name }}</span>
+              <!-- CANVAS-006: Thumbnail preview on hover -->
+              <div 
+                v-if="hoveredLabelId === label.id && label.thumbnail_path" 
+                class="label-thumbnail-preview"
+              >
+                <img 
+                  :src="label.thumbnail_path" 
+                  :alt="`${label.name} thumbnail`"
+                  @error="handleThumbnailError"
+                />
+              </div>
+            </div>
+          </div>
+          <div v-if="selectedLabel" class="mode-info">
+            <p class="mode-label">Click Mode:</p>
+            <p class="mode-keys">
+              <kbd>I</kbd> Include • <kbd>U</kbd> Exclude
+            </p>
+          </div>
+        </div>
       </div>
     </div>
     </div>
@@ -157,6 +219,13 @@ interface ImageData {
   validation: string;
 }
 
+interface Label {
+  id: string;
+  name: string;
+  color_hex: string;
+  thumbnail_path: string | null;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -168,12 +237,17 @@ const api = axios.create({
 const loading = ref(true);
 const project = ref<Project | null>(null);
 const images = ref<ImageData[]>([]);
+const labels = ref<Label[]>([]);
+const selectedLabel = ref<Label | null>(null);
 const currentFrameNumber = ref(0);
 const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
 const viewerWidth = ref(1200);
 const viewerHeight = ref(800);
-const bigJumpSize = ref(100); // TODO[NAV-004]: Load from config
+const bigJumpSize = ref(500); // Default value, will be loaded from server config
+const hoveredLabelId = ref<string | null>(null); // Track which label is being hovered
+const sidebarVisible = ref(true); // Sidebar visibility state
+const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Ref to ImageViewer component
 
 const currentImage = computed(() => {
   if (images.value.length === 0) return null;
@@ -187,7 +261,7 @@ const currentImage = computed(() => {
 });
 
 const currentImageUrl = computed(() => {
-  // TODO[CANVAS-003]: Construct actual image URL
+  // CANVAS-003: Construct image URL from backend endpoint
   return `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1'}/projects/${projectId}/frames/${currentFrameNumber.value}`;
 });
 
@@ -233,10 +307,70 @@ async function markStageVisited(): Promise<void> {
   }
 }
 
+async function fetchLabels(): Promise<void> {
+  try {
+    console.log('Fetching labels');
+    const { data } = await api.get<Label[]>('/labels');
+    console.log('Fetched labels:', data.length);
+    labels.value = data || [];
+    
+    // Auto-select first label if available
+    if (labels.value.length > 0 && !selectedLabel.value) {
+      selectedLabel.value = labels.value[0];
+      console.log('Auto-selected first label:', selectedLabel.value.name);
+    }
+  } catch (error) {
+    console.error('Failed to fetch labels:', error);
+    labels.value = [];
+  }
+}
+
+async function fetchSettings(): Promise<void> {
+  try {
+    const { data } = await api.get<{ big_jump_size: number }>('/settings');
+    if (data.big_jump_size) {
+      bigJumpSize.value = data.big_jump_size;
+      console.log('Loaded big_jump_size from config:', bigJumpSize.value);
+    }
+  } catch (error) {
+    console.error('Failed to fetch settings:', error);
+    // Keep default value
+  }
+}
+
+function selectLabel(label: Label): void {
+  selectedLabel.value = label;
+  console.log('Selected label:', label.name);
+}
+
+function cycleToNextLabel(): void {
+  if (labels.value.length === 0) return;
+  
+  if (!selectedLabel.value) {
+    selectedLabel.value = labels.value[0];
+    return;
+  }
+  
+  const currentIndex = labels.value.findIndex(l => l.id === selectedLabel.value?.id);
+  const nextIndex = (currentIndex + 1) % labels.value.length;
+  selectedLabel.value = labels.value[nextIndex];
+  console.log('Switched to label:', selectedLabel.value.name);
+}
+
+function handleThumbnailError(event: Event): void {
+  // Hide broken thumbnail images
+  const img = event.target as HTMLImageElement;
+  if (img && img.parentElement) {
+    img.parentElement.style.display = 'none';
+  }
+}
+
 function resetView(): void {
-  // This will be handled by the ImageViewer component
-  // For now, just emit an event or use a ref
-  console.log('Reset view requested');
+  imageViewerRef.value?.resetView();
+}
+
+function toggleSidebar(): void {
+  sidebarVisible.value = !sidebarVisible.value;
 }
 
 async function fetchImages(): Promise<void> {
@@ -286,13 +420,44 @@ function previousFrame(): void {
 }
 
 function nextLabeledFrame(): void {
-  // TODO[NAV-003]: Implement finding next labeled frame
-  console.log('Next labeled frame');
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex < 0) return;
+  
+  // Find the next frame that is manually labeled (after current frame)
+  for (let i = currentIndex + 1; i < images.value.length; i++) {
+    if (images.value[i].manually_labeled) {
+      currentFrameNumber.value = images.value[i].frame_number;
+      return;
+    }
+  }
+  
+  // No labeled frame found after current position
+  console.log('No more labeled frames ahead');
 }
 
 function previousLabeledFrame(): void {
-  // TODO[NAV-003]: Implement finding previous labeled frame
-  console.log('Previous labeled frame');
+  const currentIndex = images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+  if (currentIndex < 0) return;
+  
+  // Find the previous frame that is manually labeled (before current frame)
+  for (let i = currentIndex - 1; i >= 0; i--) {
+    if (images.value[i].manually_labeled) {
+      currentFrameNumber.value = images.value[i].frame_number;
+      return;
+    }
+  }
+  
+  // No labeled frame found before current position
+  console.log('No more labeled frames behind');
+}
+
+function onFrameLabeled(frameNumber: number): void {
+  // Update the local images array to mark this frame as labeled
+  const image = images.value.find(img => img.frame_number === frameNumber);
+  if (image) {
+    image.manually_labeled = true;
+    console.log('Frame marked as labeled:', frameNumber);
+  }
 }
 
 function bigJump(): void {
@@ -330,6 +495,13 @@ function handleKeyDown(event: KeyboardEvent): void {
     case 'n':
       bigJump();
       break;
+    case 'f':
+    case 'F':
+      toggleSidebar();
+      break;
+    case 't':
+      cycleToNextLabel();
+      break;
   }
 }
 
@@ -354,8 +526,8 @@ onMounted(async () => {
       project.value = manualRes.data;
     }
     
-    // Load images from backend
-    await fetchImages();
+    // Load images, labels, and settings from backend
+    await Promise.all([fetchImages(), fetchLabels(), fetchSettings()]);
   } catch (error) {
     console.error('Failed during initialization:', error);
   }
@@ -375,6 +547,23 @@ onUnmounted(() => {
 .manual-labeling-page {
   min-height: 100vh;
   background: var(--bg, #f5f7fb);
+  transition: all 0.3s ease;
+}
+
+.manual-labeling-page.fullscreen {
+  padding: 0;
+}
+
+.manual-labeling-page.fullscreen .content-wrapper {
+  padding: 0;
+  max-width: 100%;
+}
+
+.manual-labeling-page.fullscreen .hero {
+  margin: 0;
+  border-radius: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .hero {
@@ -400,6 +589,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 1.5rem 1.25rem;
   background: var(--bg, #f5f7fb);
+  transition: padding 0.3s ease;
 }
 
 .hero__text {
@@ -444,12 +634,21 @@ h1 {
   padding: 0;
   width: 100%;
   max-width: 1400px;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.labeling-container.sidebar-hidden {
+  grid-template-columns: 1fr;
+  max-width: 100%;
 }
 
 .viewer-section {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0; /* Allow flex item to shrink */
+  max-width: 100%; /* Prevent overflow */
+  overflow: hidden; /* Prevent content from overflowing */
 }
 
 .no-image {
@@ -514,6 +713,7 @@ h1 {
   border-radius: 16px;
   height: fit-content;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .control-section {
@@ -531,6 +731,40 @@ h1 {
   margin: 0;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.section-header h3 {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.section-hint {
+  font-size: 0.7rem;
+  color: var(--muted, #9ca3af);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.section-hint kbd {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #2563eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .frame-nav {
@@ -724,6 +958,192 @@ h1 {
   font-weight: 600;
   font-size: 0.8rem;
   text-transform: capitalize;
+}
+
+.no-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--surface-muted, #f9fafb);
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  text-align: center;
+}
+
+.no-labels p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted, #6b7280);
+}
+
+.no-labels .hint {
+  font-size: 0.75rem;
+  color: var(--muted, #9ca3af);
+}
+
+.label-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--surface-muted, #f9fafb);
+  border: 2px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.label-option:hover {
+  background: var(--surface, #ffffff);
+  border-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.label-option.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(124, 58, 237, 0.05));
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.label-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.label-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+/* CANVAS-006: Label thumbnail preview on hover */
+.label-option {
+  position: relative;
+}
+
+.label-thumbnail-preview {
+  position: absolute;
+  left: calc(100% + 1rem);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  pointer-events: none;
+  animation: fadeIn 0.2s ease-in-out;
+  /* Prevent thumbnail from going off-screen */
+  max-width: 200px;
+  max-height: 200px;
+}
+
+.label-thumbnail-preview::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 8px 8px 8px 0;
+  border-color: transparent rgba(0, 0, 0, 0.15) transparent transparent;
+  filter: drop-shadow(-2px 0 2px rgba(0, 0, 0, 0.1));
+}
+
+.label-thumbnail-preview img {
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  border: 3px solid #ffffff;
+  background: var(--surface, #ffffff);
+  display: block;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+/* Adjust thumbnail position for last item to prevent overflow */
+.label-selector {
+  position: relative;
+  overflow: visible;
+}
+
+/* For the last label, show thumbnail above to prevent going off-screen */
+.label-option:last-child .label-thumbnail-preview {
+  top: auto;
+  bottom: 0;
+  transform: translateY(0);
+  left: calc(100% + 1rem);
+}
+
+.label-option:last-child .label-thumbnail-preview::before {
+  top: auto;
+  bottom: 1rem;
+  transform: translateY(0);
+  border-width: 0 8px 8px 8px;
+  border-color: transparent transparent rgba(0, 0, 0, 0.15) transparent;
+  left: -8px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+}
+
+.mode-info {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(124, 58, 237, 0.03));
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+.mode-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mode-keys {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mode-keys kbd {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2563eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .ghost {
