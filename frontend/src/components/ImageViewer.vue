@@ -646,8 +646,8 @@ function renderPoint(point: Point, canvasX: number, canvasY: number): void {
   // This accounts for font metrics and ensures true visual centering
   icon.setPositionByOrigin(new fabric.Point(canvasX, canvasY), 'center', 'center');
   icon.setCoords();
-  fabricCanvas.bringToFront(circle);
-  fabricCanvas.bringToFront(icon);
+  fabricCanvas?.bringToFront(circle);
+  fabricCanvas?.bringToFront(icon);
   
   // Store references for updates
   pointCircles.value.set(point.id, circle);
@@ -883,10 +883,10 @@ function renderMask(): void {
   
   // Bring all points to front after adding mask
   pointCircles.value.forEach((circle) => {
-    fabricCanvas.bringToFront(circle);
+    fabricCanvas?.bringToFront(circle);
   });
   pointIcons.value.forEach((icon) => {
-    fabricCanvas.bringToFront(icon);
+    fabricCanvas?.bringToFront(icon);
   });
   
   fabricCanvas.renderAll();
@@ -1277,21 +1277,29 @@ function connectWebSocket(): void {
       } else if (data.status === 'error') {
         const errorMsg = data.error || 'Unknown error';
         console.error('SAM inference error:', errorMsg);
-        
+
         // Clear current mask on error
         if (errorMsg.includes('not initialized') || errorMsg.includes('failed to load')) {
+          // Gracefully handle SAM not being available by clearing mask overlay
           currentMask.value = null;
           if (maskOverlay && fabricCanvas) {
             fabricCanvas.remove(maskOverlay);
             maskOverlay = null;
             fabricCanvas.renderAll();
           }
+          // Also mark websocket as not usable for now
+          wsConnected.value = false;
         }
-        
-        // Reject pending promise if exists
+
+        // Resolve or reject pending promise if exists
         if (data.request_id && pendingRequests.has(data.request_id)) {
-          const { reject } = pendingRequests.get(data.request_id)!;
-          reject(new Error(errorMsg));
+          const pending = pendingRequests.get(data.request_id)!;
+          // If SAM isn't initialized, resolve with null to avoid throwing in UI
+          if (errorMsg.includes('not initialized')) {
+            pending.resolve(null);
+          } else {
+            pending.reject(new Error(errorMsg));
+          }
           pendingRequests.delete(data.request_id);
         }
       }

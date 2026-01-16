@@ -4,12 +4,18 @@
 This script downloads the SAM3 model from the gated Hugging Face repository
 and caches it locally so it can be mounted to Docker containers.
 
+IMPORTANT: SAM3 is a gated model. Before running this script:
+1. Go to https://huggingface.co/facebook/sam3
+2. Accept the model terms and conditions
+3. Create a HuggingFace token at https://huggingface.co/settings/tokens
+4. Make sure the token has 'read' access
+
 Usage:
     export HF_TOKEN="your_huggingface_token"
     python scripts/download_sam3_model.py
 
-The model will be cached in ./data/models/sam3/ which can be mounted to containers.
-Hugging Face Hub will automatically cache it in the standard location that SAM3 expects.
+The model will be cached in ./backend/data/models/ which gets mounted to
+the Docker container at /root/.cache/huggingface/hub/
 """
 
 import os
@@ -30,9 +36,15 @@ def main() -> None:
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
         print("ERROR: HF_TOKEN environment variable not set.")
-        print("Please set it with: export HF_TOKEN='your_token_here'")
-        print("Get your token from: https://huggingface.co/settings/tokens")
-        print("\nMake sure your token has access to the facebook/sam3 repository.")
+        print("")
+        print("To use SAM3, you need a HuggingFace token with access to the gated model.")
+        print("")
+        print("Steps:")
+        print("1. Go to https://huggingface.co/facebook/sam3")
+        print("2. Click 'Agree and access repository' to accept the terms")
+        print("3. Create a token at https://huggingface.co/settings/tokens")
+        print("4. Set it with: export HF_TOKEN='your_token_here'")
+        print("5. Run this script again")
         sys.exit(1)
 
     # Login to Hugging Face
@@ -47,55 +59,54 @@ def main() -> None:
     # Model repository
     repo_id = "facebook/sam3"
     
-    # Download to the standard Hugging Face cache structure
-    # The structure should be: <cache_dir>/hub/models--facebook--sam3/snapshots/<commit>/
-    base_cache = Path(__file__).parent.parent / "backend" / "data" / "models"
-    cache_dir = base_cache / "hub"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Download to match the Docker mount structure:
+    # Local: ./backend/data/models/ -> Container: /root/.cache/huggingface/hub/
+    # HuggingFace Hub creates: hub/models--facebook--sam3/snapshots/<commit>/
+    base_dir = Path(__file__).parent.parent / "backend" / "data" / "models"
+    base_dir.mkdir(parents=True, exist_ok=True)
     
-    # Set HF_HOME to point to the parent of hub/ (where HF_HOME expects to find the hub/ directory)
-    # This makes Hugging Face Hub use our directory instead of ~/.cache/huggingface
-    os.environ["HF_HOME"] = str(base_cache)
-
     print(f"\nDownloading SAM3 model from: {repo_id}")
-    print(f"Cache directory: {cache_dir}")
+    print(f"Cache directory: {base_dir}")
     print("This may take several minutes depending on your connection...")
     print("(The model is several GB in size)")
 
     try:
-        # Use snapshot_download with cache_dir to use standard cache structure
-        # This will create: cache_dir/models--facebook--sam3/snapshots/<commit>/
-        # Which is what Hugging Face Hub expects
+        # Download directly to the target directory
+        # This creates: base_dir/models--facebook--sam3/snapshots/<commit>/
+        # which Docker mounts to: /root/.cache/huggingface/hub/models--facebook--sam3/
         local_dir = snapshot_download(
             repo_id=repo_id,
-            cache_dir=str(cache_dir),  # This creates models--facebook--sam3/ structure inside
+            cache_dir=str(base_dir),
             token=hf_token,
-            resume_download=True,  # Resume if interrupted
+            resume_download=True,
         )
         
         print(f"\n✓ Successfully downloaded SAM3 model")
         print(f"Model cached at: {local_dir}")
-        print(f"\nCache structure created in: {cache_dir}")
         
         # Verify the structure
-        expected_structure = cache_dir / "models--facebook--sam3"
+        expected_structure = base_dir / "models--facebook--sam3"
         if expected_structure.exists():
             print(f"✓ Verified cache structure: {expected_structure}")
         else:
             print(f"⚠ Warning: Expected cache structure not found at {expected_structure}")
         
-        print(f"\nThe model is now ready to be used.")
-        print(f"\nThe docker-compose.yml mounts: ./backend/data/models:/root/.cache/huggingface/hub")
-        print(f"This makes the cache available at: /root/.cache/huggingface/hub/models--facebook--sam3")
+        print(f"\nThe model is now ready to use.")
+        print(f"Make sure to set HF_TOKEN in your .env file for Docker to use:")
+        print(f"  echo 'HF_TOKEN=your_token_here' > .env")
+        print(f"\nThen start the services: docker-compose up -d")
         
     except Exception as e:
         print(f"\nERROR: Failed to download model: {e}")
-        if "401" in str(e) or "unauthorized" in str(e).lower():
-            print("\nThis usually means:")
-            print("1. Your HF_TOKEN is invalid or expired")
-            print("2. You don't have access to the facebook/sam3 repository")
-            print("3. You need to accept the model's terms of use at:")
-            print("   https://huggingface.co/facebook/sam3")
+        if "401" in str(e) or "unauthorized" in str(e).lower() or "access" in str(e).lower():
+            print("\nThis error means you don't have access to the facebook/sam3 model.")
+            print("")
+            print("To fix this:")
+            print("1. Go to https://huggingface.co/facebook/sam3")
+            print("2. Click 'Agree and access repository' to accept the model terms")
+            print("3. Wait a few minutes for access to be granted")
+            print("4. Verify your HF_TOKEN is correct and has 'read' permissions")
+            print("5. Try running this script again")
         elif "404" in str(e) or "not found" in str(e).lower():
             print("\nThe repository may not exist or the name is incorrect.")
             print(f"Please verify the repository ID: {repo_id}")
