@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas import FrameStatus, FrameStatusAggregateResponse, FrameStatusSummary
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import get_trim_frame_bounds
 from app.models.image import Image
 from app.models.label import Label
 from app.models.mask import Mask
@@ -35,9 +36,15 @@ async def get_frame_statuses(
                 detail=f"Project with ID {project_id} not found",
             )
 
-        images_result = await db.execute(
-            select(Image).where(Image.project_id == project_id).order_by(Image.frame_number)
-        )
+        bounds = get_trim_frame_bounds(db_project)
+        query = select(Image).where(Image.project_id == project_id)
+        if bounds:
+            start_frame, end_frame = bounds
+            query = query.where(
+                Image.frame_number >= start_frame,
+                Image.frame_number <= end_frame,
+            )
+        images_result = await db.execute(query.order_by(Image.frame_number))
         images = list(images_result.scalars().all())
 
         mask_result = await db.execute(

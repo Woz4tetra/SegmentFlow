@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import is_frame_in_trim
 from app.models.image import Image
 from app.models.labeled_point import LabeledPoint
 from app.models.mask import Mask
@@ -53,6 +54,12 @@ async def clear_frame_labels(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project not found: {project_id}",
+        )
+
+    if not is_frame_in_trim(project, frame_number):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Frame {frame_number} outside trim range",
         )
 
     # Find the image

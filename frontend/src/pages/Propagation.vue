@@ -120,10 +120,11 @@
             @click="goToValidation"
             class="btn-primary btn-large"
           >
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 11l3 3L22 4" />
-              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-            </svg>
+            <img
+              src="/check_circle_256dp_FFFFFF_FILL0_wght400_GRAD0_opsz48.svg"
+              alt=""
+              class="btn-icon"
+            />
             Continue to Validation
           </button>
 
@@ -415,8 +416,7 @@ function showErrorNotification(title: string, message: string): void {
 }
 
 function goToValidation(): void {
-  // For now, go back to manual labeling which also serves as validation
-  router.push({ name: 'ManualLabeling', params: { id: projectId } });
+  router.push({ name: 'Validation', params: { id: projectId } });
 }
 
 function retryPropagation(): void {
@@ -764,6 +764,12 @@ h1 {
 .btn-primary svg {
   fill: currentColor;
   stroke: none;
+}
+
+.btn-primary .btn-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
 }
 
 .btn-secondary {

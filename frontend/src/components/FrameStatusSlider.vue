@@ -2,7 +2,7 @@
   <div class="frame-status-slider" ref="containerRef">
     <div class="slider-header">
       <span class="slider-label">Frame Progress</span>
-      <span class="slider-info">{{ currentFrame }} / {{ totalFrames }}</span>
+      <span class="slider-info">{{ currentIndexLabel }}</span>
     </div>
     
     <div class="slider-track" @click="handleTrackClick" @mousemove="handleTrackHover" @mouseleave="hoveredFrame = null">
@@ -13,8 +13,8 @@
         class="segment"
         :class="segment.status"
         :style="{ 
-          left: `${(segment.startFrame / totalFrames) * 100}%`,
-          width: `${((segment.endFrame - segment.startFrame + 1) / totalFrames) * 100}%`
+          left: `${segmentPosition(segment.startFrame)}%`,
+          width: `${segmentWidth(segment.startFrame, segment.endFrame)}%`
         }"
         :title="getSegmentTooltip(segment)"
       ></div>
@@ -22,14 +22,14 @@
       <!-- Current position indicator -->
       <div 
         class="position-indicator"
-        :style="{ left: `${(currentFrame / totalFrames) * 100}%` }"
+        :style="{ left: `${currentPosition}%` }"
       ></div>
       
       <!-- Hover tooltip -->
       <div 
         v-if="hoveredFrame !== null" 
         class="hover-tooltip"
-        :style="{ left: `${(hoveredFrame / totalFrames) * 100}%` }"
+        :style="{ left: `${framePosition(hoveredFrame)}%` }"
       >
         Frame {{ hoveredFrame }}
         <span class="tooltip-status">{{ getFrameStatusLabel(hoveredFrame) }}</span>
@@ -92,6 +92,40 @@ const emit = defineEmits<{
 
 const containerRef = ref<HTMLElement | null>(null);
 const hoveredFrame = ref<number | null>(null);
+
+const sortedFrames = computed(() =>
+  [...props.images].map((img) => img.frame_number).sort((a, b) => a - b),
+);
+
+const minFrame = computed(() => sortedFrames.value[0] ?? 0);
+const maxFrame = computed(() => sortedFrames.value[sortedFrames.value.length - 1] ?? 0);
+
+const currentIndex = computed(() => {
+  const index = sortedFrames.value.indexOf(props.currentFrame);
+  return index === -1 ? 0 : index;
+});
+
+const currentIndexLabel = computed(() => {
+  if (sortedFrames.value.length === 0) return '—';
+  return `${currentIndex.value + 1} / ${sortedFrames.value.length}`;
+});
+
+const frameRange = computed(() => Math.max(1, maxFrame.value - minFrame.value));
+
+function framePosition(frame: number | null): number {
+  if (frame === null) return 0;
+  return ((frame - minFrame.value) / frameRange.value) * 100;
+}
+
+const currentPosition = computed(() => framePosition(props.currentFrame));
+
+function segmentPosition(startFrame: number): number {
+  return framePosition(startFrame);
+}
+
+function segmentWidth(startFrame: number, endFrame: number): number {
+  return ((endFrame - startFrame + 1) / (frameRange.value + 1)) * 100;
+}
 
 // Compute frame statuses
 const frameStatuses = computed(() => {
@@ -214,10 +248,10 @@ function handleTrackClick(event: MouseEvent): void {
   const rect = track.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const percentage = x / rect.width;
-  const targetFrame = Math.round(percentage * props.totalFrames);
+  const targetFrame = Math.round(minFrame.value + percentage * frameRange.value);
   
   // Find closest valid frame
-  const validFrames = props.images.map(img => img.frame_number);
+  const validFrames = sortedFrames.value;
   const closestFrame = validFrames.reduce((prev, curr) => 
     Math.abs(curr - targetFrame) < Math.abs(prev - targetFrame) ? curr : prev
   );
@@ -230,10 +264,10 @@ function handleTrackHover(event: MouseEvent): void {
   const rect = track.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const percentage = x / rect.width;
-  const targetFrame = Math.round(percentage * props.totalFrames);
+  const targetFrame = Math.round(minFrame.value + percentage * frameRange.value);
   
   // Find closest valid frame
-  const validFrames = props.images.map(img => img.frame_number);
+  const validFrames = sortedFrames.value;
   if (validFrames.length === 0) {
     hoveredFrame.value = null;
     return;

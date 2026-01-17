@@ -10,7 +10,9 @@ from app.api.v1.schemas import ImageListResponse, ImageResponse, ImageValidation
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import get_trim_frame_bounds
 from app.models.image import Image
+from app.models.project import Project
 
 from .shared_objects import router
 
@@ -48,6 +50,16 @@ async def update_frame_validation(
             .order_by(Image.frame_number)
         )
         images = images_result.scalars().all()
+        project_result = await db.execute(select(Project).where(Project.id == project_id))
+        project = project_result.scalar_one_or_none()
+        bounds = get_trim_frame_bounds(project) if project else None
+        if bounds:
+            start_frame, end_frame = bounds
+            images = [
+                img
+                for img in images
+                if start_frame <= img.frame_number <= end_frame
+            ]
         if not images:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -102,6 +114,8 @@ async def update_frame_validation(
                     break
 
         for idx in range(start_index, end_index + 1):
+            if images[idx].manually_labeled:
+                continue
             images[idx].validation = update.validation
             db.add(images[idx])
 

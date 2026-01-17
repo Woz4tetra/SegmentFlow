@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.schemas import MaskResponse
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import is_frame_in_trim
 from app.models.image import Image
 from app.models.mask import Mask
 from app.models.project import Project
@@ -49,6 +50,12 @@ async def get_masks(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Project with ID {project_id} not found",
+            )
+
+        if not is_frame_in_trim(project, frame_number):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Frame {frame_number} outside trim range",
             )
 
         # Get image for this frame

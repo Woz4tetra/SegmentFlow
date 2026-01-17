@@ -25,6 +25,7 @@ from app.api.v1.schemas import (
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.sam3_state import get_primary_tracker
+from app.core.trim_utils import get_trim_frame_bounds
 from app.models.image import Image, ValidationStatus
 from app.models.labeled_point import LabeledPoint
 from app.models.mask import Mask
@@ -288,8 +289,21 @@ async def analyze_propagation_segments(
     if not images:
         return [], []
 
+    # Apply trim range filter if set
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_result.scalar_one_or_none()
+    bounds = get_trim_frame_bounds(project) if project else None
+    if bounds:
+        start_frame, end_frame = bounds
+        images = [img for img in images if start_frame <= img.frame_number <= end_frame]
+        if not images:
+            return [], []
+
     # Get labeled frames
     labeled_frame_numbers, labeled_images = await get_labeled_frames(project_id, db)
+    if bounds:
+        labeled_frame_numbers = [f for f in labeled_frame_numbers if start_frame <= f <= end_frame]
+        labeled_images = {f: labeled_images[f] for f in labeled_frame_numbers if f in labeled_images}
 
     if len(labeled_frame_numbers) < 1:
         return [], []

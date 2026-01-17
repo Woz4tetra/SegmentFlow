@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import is_frame_in_trim
 from app.models.project import Project
 
 from .shared_objects import router
@@ -46,6 +47,12 @@ async def get_frame_image(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Project with ID {project_id} not found",
+            )
+
+        if not is_frame_in_trim(db_project, frame_number):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Frame {frame_number} outside trim range",
             )
 
         # Construct path to inference image

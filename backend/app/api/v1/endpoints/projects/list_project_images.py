@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas import ImageListResponse, ImageResponse
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import get_trim_frame_bounds
 from app.models.image import Image
 from app.models.project import Project
 
@@ -46,10 +47,16 @@ async def list_project_images(
                 detail=f"Project with ID {project_id} not found",
             )
 
-        # Query all images for this project, ordered by frame number
-        images_result = await db.execute(
-            select(Image).where(Image.project_id == project_id).order_by(Image.frame_number)
-        )
+        # Query images for this project within trim range (if set)
+        bounds = get_trim_frame_bounds(db_project)
+        query = select(Image).where(Image.project_id == project_id)
+        if bounds:
+            start_frame, end_frame = bounds
+            query = query.where(
+                Image.frame_number >= start_frame,
+                Image.frame_number <= end_frame,
+            )
+        images_result = await db.execute(query.order_by(Image.frame_number))
         images = images_result.scalars().all()
 
         return ImageListResponse(

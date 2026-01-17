@@ -147,8 +147,8 @@
             <h3>Current Frame</h3>
             <div class="frame-info">
               <div class="frame-info-row">
-                <span>Frame Number</span>
-                <strong>{{ currentFrameNumber }} / {{ totalFrames }}</strong>
+                <span>Frame</span>
+                <strong>{{ currentFrameIndexLabel }}</strong>
               </div>
               <div class="frame-info-row">
                 <span>Status</span>
@@ -173,7 +173,7 @@
               <button
                 class="btn-validate btn-pass"
                 type="button"
-                :disabled="!currentImage || validationBusy"
+                :disabled="!currentImage || currentImage.manually_labeled || validationBusy"
                 title="Pass validation (Z)"
                 @click="setValidationStatus('passed')"
               >
@@ -182,7 +182,7 @@
               <button
                 class="btn-validate btn-fail"
                 type="button"
-                :disabled="!currentImage || validationBusy"
+                :disabled="!currentImage || currentImage.manually_labeled || validationBusy"
                 title="Fail validation (X)"
                 @click="setValidationStatus('failed')"
               >
@@ -415,6 +415,18 @@ const frameStatus = computed(() => {
   }
   
   return 'Unknown';
+});
+
+const currentFrameIndex = computed(() => {
+  if (images.value.length === 0) return -1;
+  return images.value.findIndex(img => img.frame_number === currentFrameNumber.value);
+});
+
+const currentFrameIndexLabel = computed(() => {
+  if (images.value.length === 0) return '—';
+  const index = currentFrameIndex.value;
+  if (index < 0) return `— / ${images.value.length}`;
+  return `${index + 1} / ${images.value.length}`;
 });
 
 const validationLabel = computed(() => {
@@ -817,6 +829,15 @@ onMounted(async () => {
       );
       if (validationRes.data) {
         project.value = validationRes.data;
+      }
+      if (project.value?.stage !== 'validation') {
+        const stageRes = await api.patch<Project>(
+          `/projects/${projectId}`,
+          { stage: 'validation' },
+        );
+        if (stageRes.data) {
+          project.value = stageRes.data;
+        }
       }
     }
     
