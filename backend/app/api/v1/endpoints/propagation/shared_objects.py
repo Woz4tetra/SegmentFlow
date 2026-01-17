@@ -15,7 +15,7 @@ from typing import Any
 import cv2
 import numpy as np
 from fastapi import APIRouter, WebSocket
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas import (
@@ -164,19 +164,41 @@ async def build_source_frames_data(
     return source_frames_data
 
 
+def _is_frame_eligible(
+    img: Image,
+    has_masks: bool,
+    source_updated_at: datetime | None,
+    mask_updated_at: datetime | None,
+) -> bool:
+    if not has_masks:
+        return True
+    if img.validation != ValidationStatus.FAILED.value:
+        return False
+    if not source_updated_at or not mask_updated_at:
+        return False
+    return source_updated_at > mask_updated_at
+
+
 def build_propagation_segments(
+    images_by_frame: dict[int, Image],
     labeled_frame_numbers: list[int],
-    min_frame: int,
-    max_frame: int,
     max_propagation_length: int,
+    has_mask_by_frame: dict[int, bool],
+    source_updated_by_frame: dict[int, datetime],
+    mask_updated_by_frame: dict[int, datetime],
+    max_frame: int,
 ) -> list[PropagationSegment]:
-    """Build propagation segments from labeled frames.
+    """Build propagation segments from labeled frames with filtering rules.
+
+    Frames are eligible when they are within the propagation limit from a previous
+    manually labeled image and either have no masks or are marked as validation failed.
 
     Args:
+        images_by_frame: Map of frame number to Image
         labeled_frame_numbers: Sorted list of labeled frame numbers
-        min_frame: Minimum frame number in project
-        max_frame: Maximum frame number in project
         max_propagation_length: Maximum frames per segment
+        has_mask_by_frame: Map of frame number to mask presence
+        max_frame: Maximum frame number in project
 
     Returns:
         List of PropagationSegment objects
@@ -184,37 +206,60 @@ def build_propagation_segments(
     segments: list[PropagationSegment] = []
 
     for i, labeled_frame in enumerate(labeled_frame_numbers):
-        # Forward propagation
         if i < len(labeled_frame_numbers) - 1:
             next_labeled = labeled_frame_numbers[i + 1]
             end_frame = min(labeled_frame + max_propagation_length, next_labeled - 1)
         else:
             end_frame = min(labeled_frame + max_propagation_length, max_frame)
 
-        if end_frame > labeled_frame:
+        if end_frame <= labeled_frame:
+            continue
+
+        eligible_frames: list[int] = []
+        source_updated_at = source_updated_by_frame.get(labeled_frame)
+        for frame in range(labeled_frame + 1, end_frame + 1):
+            img = images_by_frame.get(frame)
+            if not img or img.manually_labeled:
+                continue
+            has_masks = has_mask_by_frame.get(frame, False)
+            if _is_frame_eligible(
+                img,
+                has_masks,
+                source_updated_at,
+                mask_updated_by_frame.get(frame),
+            ):
+                eligible_frames.append(frame)
+
+        if not eligible_frames:
+            continue
+
+        start_frame = eligible_frames[0]
+        prev_frame = eligible_frames[0]
+        for frame in eligible_frames[1:]:
+            if frame == prev_frame + 1:
+                prev_frame = frame
+                continue
             segments.append(
                 PropagationSegment(
-                    start_frame=labeled_frame + 1,
-                    end_frame=end_frame,
+                    start_frame=start_frame,
+                    end_frame=prev_frame,
                     source_frame=labeled_frame,
                     direction="forward",
-                    num_frames=end_frame - labeled_frame,
+                    num_frames=prev_frame - start_frame + 1,
                 )
             )
+            start_frame = frame
+            prev_frame = frame
 
-        # Backward propagation (only for first labeled frame)
-        if i == 0:
-            start_frame = max(labeled_frame - max_propagation_length, min_frame)
-            if start_frame < labeled_frame:
-                segments.append(
-                    PropagationSegment(
-                        start_frame=start_frame,
-                        end_frame=labeled_frame - 1,
-                        source_frame=labeled_frame,
-                        direction="backward",
-                        num_frames=labeled_frame - start_frame,
-                    )
-                )
+        segments.append(
+            PropagationSegment(
+                start_frame=start_frame,
+                end_frame=prev_frame,
+                source_frame=labeled_frame,
+                direction="forward",
+                num_frames=prev_frame - start_frame + 1,
+            )
+        )
 
     return segments
 
@@ -251,16 +296,46 @@ async def analyze_propagation_segments(
 
     # Get frame boundaries
     all_frame_numbers = [img.frame_number for img in images]
-    min_frame = min(all_frame_numbers)
     max_frame = max(all_frame_numbers)
 
     # Build source frames data
     source_frames_data = await build_source_frames_data(labeled_frame_numbers, labeled_images, db)
 
+    # Build mask presence map for filtering
+    mask_result = await db.execute(
+        select(Mask.image_id, func.max(Mask.updated_at))
+        .join(Image, Mask.image_id == Image.id)
+        .where(Image.project_id == project_id)
+        .group_by(Mask.image_id)
+    )
+    mask_updated_by_image_id = {row[0]: row[1] for row in mask_result.all()}
+    images_by_frame = {img.frame_number: img for img in images}
+    has_mask_by_frame = {img.frame_number: (img.id in mask_updated_by_image_id) for img in images}
+    mask_updated_by_frame = {
+        img.frame_number: mask_updated_by_image_id.get(img.id) for img in images
+    }
+
+    source_points_result = await db.execute(
+        select(Image.frame_number, func.max(LabeledPoint.updated_at))
+        .join(LabeledPoint, LabeledPoint.image_id == Image.id)
+        .where(Image.project_id == project_id)
+        .group_by(Image.frame_number)
+    )
+    source_updated_by_frame = {row[0]: row[1] for row in source_points_result.all()}
+    for img in images:
+        if img.manually_labeled and img.frame_number not in source_updated_by_frame:
+            source_updated_by_frame[img.frame_number] = img.updated_at
+
     # Sort and build segments
     labeled_frame_numbers.sort()
     segments = build_propagation_segments(
-        labeled_frame_numbers, min_frame, max_frame, max_propagation_length
+        images_by_frame,
+        labeled_frame_numbers,
+        max_propagation_length,
+        has_mask_by_frame,
+        source_updated_by_frame,
+        mask_updated_by_frame,
+        max_frame,
     )
 
     return segments, source_frames_data

@@ -209,6 +209,13 @@ interface PropagationProgress {
   error: string | null;
 }
 
+interface FrameStatusSummary {
+  manual_frames: number;
+  propagated_frames: number;
+  total_frames: number;
+  labels_count: number;
+}
+
 interface PropagationStats {
   manualFrames: number;
   propagatedFrames: number;
@@ -294,36 +301,15 @@ async function fetchProject(): Promise<void> {
 
 async function fetchStats(): Promise<void> {
   try {
-    const { data } = await api.get<{ images: any[]; total: number }>(`/projects/${projectId}/images`);
-    const images = data.images || [];
-    
-    const manualFrames = images.filter(img => img.manually_labeled).length;
-    const totalFrames = images.length;
-    
-    // Get labels count
-    const labelsResponse = await api.get<any[]>('/labels');
-    const labelsCount = labelsResponse.data?.length ?? 0;
-    
-    // Count frames with masks (propagated)
-    let propagatedFrames = 0;
-    for (const img of images) {
-      if (!img.manually_labeled) {
-        try {
-          const masksResponse = await api.get(`/projects/${projectId}/frames/${img.frame_number}/masks`);
-          if (masksResponse.data && masksResponse.data.length > 0) {
-            propagatedFrames++;
-          }
-        } catch {
-          // Ignore errors
-        }
-      }
-    }
-    
+    const { data } = await api.get<{ summary: FrameStatusSummary }>(
+      `/projects/${projectId}/frame-statuses`,
+    );
+    const summary = data.summary || {};
     stats.value = {
-      manualFrames,
-      propagatedFrames,
-      totalFrames,
-      labels: labelsCount,
+      manualFrames: summary.manual_frames ?? 0,
+      propagatedFrames: summary.propagated_frames ?? 0,
+      totalFrames: summary.total_frames ?? 0,
+      labels: summary.labels_count ?? 0,
     };
   } catch (error) {
     console.error('Failed to fetch stats:', error);

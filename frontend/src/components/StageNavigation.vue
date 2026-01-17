@@ -58,7 +58,7 @@ const stages: Stage[] = [
   { id: 'trim', name: 'Trim', route: 'Trim' },
   { id: 'manual_labeling', name: 'Manual Label', route: 'ManualLabeling' },
   { id: 'propagation', name: 'Propagate', route: 'Propagation' },
-  { id: 'validation', name: 'Validation', route: 'ManualLabeling' },
+  { id: 'validation', name: 'Validation', route: 'Validation' },
   { id: 'export', name: 'Export', route: 'Home' },
 ];
 

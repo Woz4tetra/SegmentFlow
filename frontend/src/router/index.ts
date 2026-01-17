@@ -15,6 +15,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/projects/:id/upload', name: 'Upload', component: Upload },
   { path: '/projects/:id/trim', name: 'Trim', component: Trim },
   { path: '/projects/:id/manual-labeling', name: 'ManualLabeling', component: ManualLabeling },
+  { path: '/projects/:id/validation', name: 'Validation', component: ManualLabeling },
   { path: '/projects/:id/propagation', name: 'Propagation', component: Propagation },
 ];
 

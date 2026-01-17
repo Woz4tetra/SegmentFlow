@@ -289,6 +289,54 @@ class ImageListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of images")
 
 
+class ImageValidationUpdate(BaseModel):
+    """Schema for updating image validation status.
+
+    Attributes:
+        validation: Validation status (not_validated, passed, failed)
+    """
+
+    validation: str = Field(..., description="Validation status")
+
+    @field_validator("validation")
+    @classmethod
+    def validate_validation(cls, v: str) -> str:
+        valid_statuses = {"not_validated", "passed", "failed"}
+        if v not in valid_statuses:
+            msg = f"Invalid validation status: {v}. Must be one of {valid_statuses}"
+            raise ValueError(msg)
+        return v
+
+
+class FrameStatus(BaseModel):
+    """Schema for per-frame status used in aggregates."""
+
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    status: str = Field(..., description="Processing status")
+    manually_labeled: bool = Field(False, description="Whether manually labeled")
+    validation: str = Field(..., description="Validation status")
+    has_mask: bool = Field(False, description="Whether any mask exists")
+
+
+class FrameStatusSummary(BaseModel):
+    """Schema for aggregated frame status counts."""
+
+    total_frames: int = Field(..., ge=0, description="Total number of frames")
+    manual_frames: int = Field(..., ge=0, description="Frames with manual labels")
+    propagated_frames: int = Field(..., ge=0, description="Frames with propagated masks")
+    validated_frames: int = Field(..., ge=0, description="Frames marked passed")
+    failed_frames: int = Field(..., ge=0, description="Frames marked failed")
+    unlabeled_frames: int = Field(..., ge=0, description="Frames without labels")
+    labels_count: int = Field(..., ge=0, description="Total labels count")
+
+
+class FrameStatusAggregateResponse(BaseModel):
+    """Schema for frame status aggregates."""
+
+    frames: list[FrameStatus] = Field(..., description="Per-frame statuses")
+    summary: FrameStatusSummary
+
+
 # ===== SAM3 WebSocket Schemas =====
 
 

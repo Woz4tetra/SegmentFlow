@@ -82,6 +82,23 @@ export const useProjectsStore = defineStore('projects', {
         return null;
       }
     },
+    async deleteProject(projectId: string): Promise<boolean> {
+      try {
+        await api.delete(`/projects/${projectId}`);
+        this.projects = this.projects.filter((project) => project.id !== projectId);
+        this.total = Math.max(0, this.total - 1);
+        return true;
+      } catch (err) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.detail
+            ? String(err.response.data.detail)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to delete project';
+        this.error = message;
+        return false;
+      }
+    },
   },
   getters: {
     activeProjects: (state): Project[] => state.projects.filter((p) => p.active),

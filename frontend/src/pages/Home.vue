@@ -65,15 +65,32 @@
             @error="onThumbnailError"
           />
           <div class="thumb__top">
-            <span
-              class="stage"
-              :data-tone="toneForStage(effectiveStage(project))"
-            >
-              {{ labelForStage(effectiveStage(project)) }}
-            </span>
-            <span class="status" :data-active="project.active">
-              {{ project.active ? 'Active' : 'Archived' }}
-            </span>
+            <div class="thumb__badges">
+              <span
+                class="stage"
+                :data-tone="toneForStage(effectiveStage(project))"
+              >
+                {{ labelForStage(effectiveStage(project)) }}
+              </span>
+              <span class="status" :data-active="project.active">
+                {{ project.active ? 'Active' : 'Archived' }}
+              </span>
+            </div>
+            <div class="card-menu" @click.stop>
+              <button
+                class="menu-trigger"
+                type="button"
+                aria-label="Project actions"
+                @click.stop="toggleMenu(project.id)"
+              >
+                ...
+              </button>
+              <div v-if="openMenuId === project.id" class="menu-panel">
+                <button class="menu-item menu-item--danger" type="button" @click.stop="promptDelete(project)">
+                  Delete project
+                </button>
+              </div>
+            </div>
           </div>
           <div class="thumb__name">{{ project.name }}</div>
         </div>
@@ -89,16 +106,36 @@
           </div>
           <div v-if="visible_columns.video && project.video_path" class="meta__row" title="Video path">
             <span>Video</span>
-            <strong class="truncate">{{ project.video_path }}</strong>
+            <strong class="truncate">{{ displayVideoName(project.video_path) }}</strong>
           </div>
         </div>
       </article>
     </div>
   </section>
+
+  <div v-if="deleteTarget" class="modal-overlay" @click.self="closeDeleteModal">
+    <div class="modal-dialog">
+      <h3>Delete project?</h3>
+      <p>
+        This will permanently remove
+        <strong>{{ deleteTarget.name }}</strong>
+        and all associated frames and labels for this project.
+      </p>
+      <p v-if="deleteError" class="modal-error">{{ deleteError }}</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" type="button" :disabled="deleteBusy" @click="closeDeleteModal">
+          Cancel
+        </button>
+        <button class="btn-confirm-delete" type="button" :disabled="deleteBusy" @click="confirmDelete">
+          {{ deleteBusy ? 'Deleting...' : 'Delete project' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
@@ -107,7 +144,7 @@ import { useRouter } from 'vue-router';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
-const { fetchProjects } = projectsStore;
+const { fetchProjects, deleteProject } = projectsStore;
 
 const userSettingsStore = useUserSettingsStore();
 const { visible_columns } = storeToRefs(userSettingsStore);
@@ -117,7 +154,7 @@ const router = useRouter();
 const stageMeta: Record<ProjectStage, { label: string; tone: 'info' | 'warn' | 'success' | 'accent' }> = {
   upload: { label: 'Stage 0 / Upload', tone: 'accent' },
   trim: { label: 'Stage 1 / Trim', tone: 'info' },
-  manual_labeling: { label: 'Stage 2 / Manual Labeling', tone: 'accent' },
+  manual_labeling: { label: 'Stage 2 / Labeling', tone: 'accent' },
   propagation: { label: 'Stage 3 / Propagation', tone: 'info' },
   validation: { label: 'Stage 4 / Validation', tone: 'warn' },
   export: { label: 'Stage 5 / Export', tone: 'success' },
@@ -181,8 +218,12 @@ const effectiveStage = (project: Project): ProjectStage => {
   return project.stage;
 };
 
-const isStageAvailable = (stage: ProjectStage): boolean => 
-  stage === 'upload' || stage === 'trim' || stage === 'manual_labeling';
+const isStageAvailable = (stage: ProjectStage): boolean =>
+  stage === 'upload' ||
+  stage === 'trim' ||
+  stage === 'manual_labeling' ||
+  stage === 'propagation' ||
+  stage === 'validation';
 
 const routeForProject = (project: Project) => {
   const eff = effectiveStage(project);
@@ -194,6 +235,12 @@ const routeForProject = (project: Project) => {
   }
   if (eff === 'manual_labeling' && project.id) {
     return { name: 'ManualLabeling', params: { id: project.id } };
+  }
+  if (eff === 'propagation' && project.id) {
+    return { name: 'Propagation', params: { id: project.id } };
+  }
+  if (eff === 'validation' && project.id) {
+    return { name: 'Validation', params: { id: project.id } };
   }
   return null;
 };
@@ -213,8 +260,63 @@ const handleCreateProject = () => {
   router.push({ name: 'Upload', params: { id: 'new' } });
 };
 
+const openMenuId = ref<string | null>(null);
+const deleteTarget = ref<Project | null>(null);
+const deleteBusy = ref(false);
+const deleteError = ref('');
+
+const displayVideoName = (path?: string | null): string => {
+  if (!path) return '—';
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+};
+
+const toggleMenu = (projectId: string) => {
+  openMenuId.value = openMenuId.value === projectId ? null : projectId;
+};
+
+const closeMenu = () => {
+  openMenuId.value = null;
+};
+
+const promptDelete = (project: Project) => {
+  deleteTarget.value = project;
+  deleteError.value = '';
+  closeMenu();
+};
+
+const closeDeleteModal = () => {
+  if (deleteBusy.value) return;
+  deleteTarget.value = null;
+  deleteError.value = '';
+};
+
+const confirmDelete = async () => {
+  if (!deleteTarget.value || deleteBusy.value) return;
+  deleteBusy.value = true;
+  deleteError.value = '';
+  const success = await deleteProject(deleteTarget.value.id);
+  deleteBusy.value = false;
+  if (success) {
+    deleteTarget.value = null;
+  } else {
+    deleteError.value = projectsStore.error || 'Failed to delete project';
+  }
+};
+
+const handleGlobalClick = () => {
+  if (openMenuId.value) {
+    closeMenu();
+  }
+};
+
 onMounted(() => {
   fetchProjects();
+  window.addEventListener('click', handleGlobalClick);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', handleGlobalClick);
 });
 </script>
 
@@ -403,9 +505,15 @@ h1 {
 .thumb__top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   position: relative;
   z-index: 1;
+}
+
+.thumb__badges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .thumb__name {
@@ -421,6 +529,7 @@ h1 {
   font-size: 0.85rem;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
 }
 
 
@@ -451,6 +560,71 @@ h1 {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.01em;
+}
+
+.card-menu {
+  position: relative;
+  z-index: 2;
+}
+
+.menu-trigger {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(15, 23, 42, 0.2);
+  color: #ffffff;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.menu-trigger:hover {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.menu-panel {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  min-width: 160px;
+  background: var(--surface, #ffffff);
+  border-radius: 12px;
+  border: 1px solid var(--border, #dfe3ec);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.menu-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--text, #0f172a);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.menu-item:hover {
+  background: var(--surface-muted, #f3f4f6);
+}
+
+.menu-item--danger {
+  color: #dc2626;
+}
+
+.menu-item--danger:hover {
+  background: rgba(220, 38, 38, 0.12);
 }
 
 .thumb__id {
@@ -508,6 +682,83 @@ h1 {
   color: var(--muted, #4b5563);
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.15s ease;
+}
+
+.modal-dialog {
+  background: var(--surface, #ffffff);
+  border-radius: 16px;
+  padding: 1.5rem;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.2s ease;
+}
+
+.modal-dialog h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  color: var(--text, #0f172a);
+}
+
+.modal-dialog p {
+  margin: 0 0 1.1rem;
+  font-size: 0.9rem;
+  color: var(--muted, #6b7280);
+  line-height: 1.5;
+}
+
+.modal-error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel {
+  padding: 0.6rem 1rem;
+  background: var(--surface-muted, #f3f4f6);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  color: var(--text, #374151);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: var(--surface, #ffffff);
+  border-color: var(--border-hover, #d1d5db);
+}
+
+.btn-confirm-delete {
+  padding: 0.6rem 1rem;
+  background: #ef4444;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-confirm-delete:hover:not(:disabled) {
+  background: #dc2626;
+}
+
 .skeleton-block {
   height: 60px;
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.03), rgba(255, 255, 255, 0.05));
@@ -523,6 +774,26 @@ h1 {
   }
   100% {
     opacity: 0.6;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

@@ -2,8 +2,10 @@ from .cancel_video_upload import cancel_video_upload
 from .clear_frame_labels import clear_frame_labels
 from .complete_video_upload import complete_video_upload
 from .create_project import create_project
+from .delete_project import delete_project
 from .get_conversion_progress import get_conversion_progress
 from .get_frame_image import get_frame_image
+from .get_frame_statuses import get_frame_statuses
 from .get_labeled_points import get_labeled_points
 from .get_masks import get_masks
 from .get_project import get_project
@@ -19,6 +21,7 @@ from .save_mask import save_mask
 from .set_trim_range import set_trim_range
 from .shared_objects import router
 from .update_project import update_project
+from .update_frame_validation import update_frame_validation
 from .upload_video_chunk import upload_video_chunk
 from .video_info import video_info
 
@@ -27,8 +30,10 @@ __all__ = [
     "clear_frame_labels",
     "complete_video_upload",
     "create_project",
+    "delete_project",
     "get_conversion_progress",
     "get_frame_image",
+    "get_frame_statuses",
     "get_labeled_points",
     "get_masks",
     "get_project",
@@ -44,6 +49,7 @@ __all__ = [
     "save_mask",
     "set_trim_range",
     "update_project",
+    "update_frame_validation",
     "upload_video_chunk",
     "video_info",
 ]

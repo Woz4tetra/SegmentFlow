@@ -11,10 +11,13 @@
         <span>Back to Projects</span>
       </router-link>
       <div class="hero__text">
-        <p class="eyebrow">Stage: Manual Labeling</p>
+        <p class="eyebrow">Stage: {{ isValidationMode ? 'Validation' : 'Manual Labeling' }}</p>
         <h1>{{ project?.name ?? 'Loading...' }}</h1>
         <p class="lede">
-          Click on the image to add labeled points. Use keyboard shortcuts for faster labeling.
+          {{ isValidationMode
+            ? 'Review propagated masks and mark each frame as pass or fail.'
+            : 'Click on the image to add labeled points. Use keyboard shortcuts for faster labeling.'
+          }}
         </p>
       </div>
     </section>
@@ -151,6 +154,40 @@
                 <span>Status</span>
                 <strong class="status-badge">{{ frameStatus }}</strong>
               </div>
+            </div>
+          </div>
+
+          <!-- Validation Panel (VAL-001/VAL-002) -->
+          <div v-if="isValidationMode" class="control-section validation-section">
+            <h3>Validation</h3>
+            <p class="section-description">
+              Mark the current frame as passed or failed after review.
+            </p>
+            <div class="validation-status">
+              <span>Status</span>
+              <strong class="validation-pill" :data-status="currentImage?.validation ?? 'not_validated'">
+                {{ validationLabel }}
+              </strong>
+            </div>
+            <div class="validation-actions">
+              <button
+                class="btn-validate btn-pass"
+                type="button"
+                :disabled="!currentImage || validationBusy"
+                title="Pass validation (Z)"
+                @click="setValidationStatus('passed')"
+              >
+                Pass <span class="hotkey">Z</span>
+              </button>
+              <button
+                class="btn-validate btn-fail"
+                type="button"
+                :disabled="!currentImage || validationBusy"
+                title="Fail validation (X)"
+                @click="setValidationStatus('failed')"
+              >
+                Fail <span class="hotkey">X</span>
+              </button>
             </div>
           </div>
 
@@ -308,6 +345,14 @@ interface Label {
   thumbnail_path: string | null;
 }
 
+interface FrameStatusData {
+  frame_number: number;
+  status: string;
+  manually_labeled: boolean;
+  validation: string;
+  has_mask: boolean;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -331,6 +376,9 @@ const hoveredLabelId = ref<string | null>(null); // Track which label is being h
 const sidebarVisible = ref(true); // Sidebar visibility state
 const showClearAllConfirm = ref(false); // Clear all confirmation dialog
 const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Ref to ImageViewer component
+const validationBusy = ref(false);
+
+const isValidationMode = computed(() => route.name === 'Validation');
 
 const currentImage = computed(() => {
   if (images.value.length === 0) return null;
@@ -367,6 +415,15 @@ const frameStatus = computed(() => {
   }
   
   return 'Unknown';
+});
+
+const validationLabel = computed(() => {
+  if (!currentImage.value) return 'No Image';
+  return {
+    passed: 'Validated',
+    failed: 'Failed',
+    not_validated: 'Not Validated',
+  }[currentImage.value.validation] ?? 'Not Validated';
 });
 
 // Count of labeled frames for Auto Label button (PROP-UI-003)
@@ -434,6 +491,23 @@ async function fetchSettings(): Promise<void> {
   } catch (error) {
     console.error('Failed to fetch settings:', error);
     // Keep default value
+  }
+}
+
+async function setValidationStatus(status: 'passed' | 'failed'): Promise<void> {
+  if (!currentImage.value || validationBusy.value) return;
+  validationBusy.value = true;
+  try {
+    const { data } = await api.patch<{ images: ImageData[]; total: number }>(
+      `/projects/${projectId}/frames/${currentFrameNumber.value}/validation`,
+      { validation: status },
+    );
+    images.value = data.images || [];
+    totalFrames.value = data.total || images.value.length;
+  } catch (error) {
+    console.error('Failed to update validation status:', error);
+  } finally {
+    validationBusy.value = false;
   }
 }
 
@@ -650,25 +724,13 @@ function goToFrameFromSlider(frameNumber: number): void {
 // PROP-UI-004: Fetch mask status for all frames (called after initial load and propagation)
 async function fetchMaskStatus(): Promise<void> {
   try {
-    // Fetch masks for a sample of frames to determine which have propagated masks
-    // In production, this would ideally be a batch endpoint
+    const { data } = await api.get<{ frames: FrameStatusData[] }>(
+      `/projects/${projectId}/frame-statuses`,
+    );
     const statusMap = new Map<number, boolean>();
-    
-    // Check masks for each image (non-manually-labeled ones)
-    for (const img of images.value) {
-      if (!img.manually_labeled) {
-        try {
-          const response = await api.get(`/projects/${projectId}/frames/${img.frame_number}/masks`);
-          statusMap.set(img.frame_number, response.data && response.data.length > 0);
-        } catch {
-          statusMap.set(img.frame_number, false);
-        }
-      } else {
-        // Manually labeled frames always have masks
-        statusMap.set(img.frame_number, true);
-      }
+    for (const frame of data.frames || []) {
+      statusMap.set(frame.frame_number, frame.has_mask ?? false);
     }
-    
     maskStatusByFrame.value = statusMap;
   } catch (error) {
     console.error('Failed to fetch mask status:', error);
@@ -709,6 +771,16 @@ function handleKeyDown(event: KeyboardEvent): void {
     case 't':
       cycleToNextLabel();
       break;
+    case 'z':
+      if (isValidationMode.value) {
+        setValidationStatus('passed');
+      }
+      break;
+    case 'x':
+      if (isValidationMode.value) {
+        setValidationStatus('failed');
+      }
+      break;
   }
 }
 
@@ -731,6 +803,14 @@ onMounted(async () => {
     const manualRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
     if (manualRes.data) {
       project.value = manualRes.data;
+    }
+    if (isValidationMode.value) {
+      const validationRes = await api.post<Project>(
+        `/projects/${projectId}/mark_stage_visited?stage=validation`,
+      );
+      if (validationRes.data) {
+        project.value = validationRes.data;
+      }
     }
     
     // Load images, labels, and settings from backend
@@ -1171,6 +1251,100 @@ h1 {
   font-size: 0.95rem;
   color: var(--text, #0f172a);
   font-weight: 700;
+}
+
+.validation-section {
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 1rem;
+}
+
+.validation-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-muted, #f9fafb);
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+.validation-status span {
+  font-size: 0.85rem;
+  color: var(--muted, #6b7280);
+  font-weight: 500;
+}
+
+.validation-pill {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(148, 163, 184, 0.15);
+  color: #64748b;
+}
+
+.validation-pill[data-status='passed'] {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+
+.validation-pill[data-status='failed'] {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+.validation-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.btn-validate {
+  flex: 1;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.btn-validate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-pass {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(34, 197, 94, 0.05));
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.btn-pass:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  color: #ffffff;
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+.btn-fail {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05));
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.btn-fail:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #ffffff;
+  border-color: transparent;
+  transform: translateY(-1px);
 }
 
 .status-badge {
