@@ -504,6 +504,7 @@ async function setValidationStatus(status: 'passed' | 'failed'): Promise<void> {
     );
     images.value = data.images || [];
     totalFrames.value = data.total || images.value.length;
+    fetchMaskStatus();
   } catch (error) {
     console.error('Failed to update validation status:', error);
   } finally {
@@ -730,6 +731,12 @@ async function fetchMaskStatus(): Promise<void> {
     const statusMap = new Map<number, boolean>();
     for (const frame of data.frames || []) {
       statusMap.set(frame.frame_number, frame.has_mask ?? false);
+      const image = images.value.find(img => img.frame_number === frame.frame_number);
+      if (image) {
+        image.manually_labeled = frame.manually_labeled;
+        image.validation = frame.validation;
+        image.status = frame.status;
+      }
     }
     maskStatusByFrame.value = statusMap;
   } catch (error) {

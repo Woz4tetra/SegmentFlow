@@ -50,6 +50,10 @@
         <span class="legend-label">Validated ({{ validatedCount }})</span>
       </div>
       <div class="legend-item">
+        <span class="legend-dot failed"></span>
+        <span class="legend-label">Failed ({{ failedCount }})</span>
+      </div>
+      <div class="legend-item">
         <span class="legend-dot unlabeled"></span>
         <span class="legend-label">Unlabeled ({{ unlabeledCount }})</span>
       </div>
@@ -151,19 +155,29 @@ const segments = computed<Segment[]>(() => {
 
 // Count statistics
 const manualCount = computed(() => 
-  props.images.filter(img => img.manually_labeled && img.validation !== 'passed').length
+  props.images.filter(
+    img => img.manually_labeled && img.validation !== 'passed' && img.validation !== 'failed',
+  ).length
 );
 
 const propagatedCount = computed(() => 
-  props.images.filter(img => !img.manually_labeled && img.has_mask && img.validation !== 'passed').length
+  props.images.filter(
+    img => !img.manually_labeled && img.has_mask && img.validation !== 'passed' && img.validation !== 'failed',
+  ).length
 );
 
 const validatedCount = computed(() => 
   props.images.filter(img => img.validation === 'passed').length
 );
 
+const failedCount = computed(() => 
+  props.images.filter(img => img.validation === 'failed').length
+);
+
 const unlabeledCount = computed(() => 
-  props.images.filter(img => !img.manually_labeled && !img.has_mask && img.validation !== 'passed').length
+  props.images.filter(
+    img => !img.manually_labeled && !img.has_mask && img.validation !== 'passed' && img.validation !== 'failed',
+  ).length
 );
 
 function getSegmentTooltip(segment: Segment): string {
@@ -396,6 +410,10 @@ function handleTrackHover(event: MouseEvent): void {
 
 .legend-dot.validated {
   background: #22c55e;
+}
+
+.legend-dot.failed {
+  background: #ef4444;
 }
 
 .legend-dot.unlabeled {
