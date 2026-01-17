@@ -223,7 +223,8 @@ const isStageAvailable = (stage: ProjectStage): boolean =>
   stage === 'trim' ||
   stage === 'manual_labeling' ||
   stage === 'propagation' ||
-  stage === 'validation';
+  stage === 'validation' ||
+  stage === 'export';
 
 const routeForProject = (project: Project) => {
   const eff = effectiveStage(project);
@@ -241,6 +242,9 @@ const routeForProject = (project: Project) => {
   }
   if (eff === 'validation' && project.id) {
     return { name: 'Validation', params: { id: project.id } };
+  }
+  if (eff === 'export' && project.id) {
+    return { name: 'Export', params: { id: project.id } };
   }
   return null;
 };

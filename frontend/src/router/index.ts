@@ -7,6 +7,7 @@ const Trim = () => import('../pages/Trim.vue');
 const Labels = () => import('../pages/Labels.vue');
 const ManualLabeling = () => import('../pages/ManualLabeling.vue');
 const Propagation = () => import('../pages/Propagation.vue');
+const Export = () => import('../pages/Export.vue');
 
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'Home', component: Home },
@@ -17,6 +18,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/projects/:id/manual-labeling', name: 'ManualLabeling', component: ManualLabeling },
   { path: '/projects/:id/validation', name: 'Validation', component: ManualLabeling },
   { path: '/projects/:id/propagation', name: 'Propagation', component: Propagation },
+  { path: '/projects/:id/export', name: 'Export', component: Export },
 ];
 
 const router = createRouter({

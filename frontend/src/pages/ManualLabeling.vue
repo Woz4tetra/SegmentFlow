@@ -206,15 +206,15 @@
               <span>Label at least 1 frame first</span>
             </div>
             <button 
-              @click="goToPropagation"
-              class="btn-auto-label"
+              @click="handlePrepareAction"
+              :class="['btn-auto-label', { 'btn-auto-label--export': isValidationMode }]"
               :disabled="labeledFrameCount === 0"
-              :title="labeledFrameCount === 0 ? 'Label at least one frame first' : 'Start automatic label propagation'"
+              :title="labeledFrameCount === 0 ? 'Label at least one frame first' : isValidationMode ? 'Go to export' : 'Start automatic label propagation'"
             >
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5,3 19,12 5,21" fill="currentColor" stroke="none" />
               </svg>
-              Prepare Auto Labeling
+              {{ isValidationMode ? 'Prepare Export' : 'Prepare Auto Labeling' }}
             </button>
           </div>
         </div>
@@ -727,6 +727,15 @@ async function goToPropagation(): Promise<void> {
   }
   
   router.push({ name: 'Propagation', params: { id: projectId } });
+}
+
+function handlePrepareAction(): void {
+  if (labeledFrameCount.value === 0) return;
+  if (isValidationMode.value) {
+    router.push({ name: 'Export', params: { id: projectId } });
+  } else {
+    goToPropagation();
+  }
 }
 
 // PROP-UI-004: Navigate to frame from slider click
@@ -1760,6 +1769,15 @@ h1 {
   cursor: not-allowed;
   background: var(--surface-muted, #9ca3af);
   box-shadow: none;
+}
+
+.btn-auto-label--export {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.25);
+}
+
+.btn-auto-label--export:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
 }
 
 .btn-auto-label svg {
