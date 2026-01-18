@@ -35,6 +35,7 @@
 import { ref, onMounted, watch, onBeforeUnmount, nextTick, computed } from 'vue';
 import { fabric } from 'fabric';
 import axios from 'axios';
+import { API_BASE_URL, buildWebSocketUrl } from '../lib/api';
 
 interface Label {
   id: string;
@@ -94,7 +95,7 @@ const imageLoaded = ref(false);
 
 // API client
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 20000,
 });
 
@@ -946,7 +947,7 @@ function connectWebSocket(): void {
     return;
   }
   
-  const wsUrl = `ws://localhost:8000/api/v1/sam3/inference`;
+  const wsUrl = buildWebSocketUrl('/sam3/inference');
   console.log('Connecting to SAM WebSocket:', wsUrl);
   
   websocket = new WebSocket(wsUrl);

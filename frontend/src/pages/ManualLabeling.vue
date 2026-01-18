@@ -311,6 +311,7 @@
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
+import { API_BASE_URL, buildApiUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 import ImageViewer from '../components/ImageViewer.vue';
 import FrameStatusSlider from '../components/FrameStatusSlider.vue';
@@ -361,7 +362,7 @@ const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
 const api = axios.create({ 
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1', 
+  baseURL: API_BASE_URL, 
   timeout: 20000 
 });
 
@@ -398,7 +399,7 @@ const currentImage = computed(() => {
 
 const currentImageUrl = computed(() => {
   // CANVAS-003: Construct image URL from backend endpoint
-  return `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1'}/projects/${projectId}/frames/${currentFrameNumber.value}`;
+  return buildApiUrl(`/projects/${projectId}/frames/${currentFrameNumber.value}`);
 });
 
 const frameStatus = computed(() => {

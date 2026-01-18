@@ -121,6 +121,7 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 import DualRangeSlider from '../components/DualRangeSlider.vue';
 import StageNavigation from '../components/StageNavigation.vue';
 
@@ -153,14 +154,14 @@ interface LabelSetting {
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1', timeout: 20000 });
+const api = axios.create({ baseURL: API_BASE_URL, timeout: 20000 });
 
 const loading = ref(true);
 const project = ref<Project | null>(null);
 const duration = ref(0);
 const startSec = ref(0);
 const endSec = ref(0);
-const baseApi = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1';
+const baseApi = API_BASE_URL;
 const previewStartUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${startSec.value}`);
 const previewEndUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${endSec.value}`);
 

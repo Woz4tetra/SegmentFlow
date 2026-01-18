@@ -60,11 +60,11 @@ Once all services are healthy:
 ### Stopping Services
 
 ```bash
-# Stop all services (keeps data in volumes)
+# Stop all services (keeps data in ./data)
 docker-compose down
 
-# Stop services and remove volumes (WARNING: deletes database)
-docker-compose down -v
+# Stop services only (data still lives in ./data)
+docker-compose down
 
 # Rebuild images after dependency changes
 docker-compose up -d --build
@@ -251,8 +251,9 @@ What the script does:
 If you want to reset everything (data loss):
 
 ```bash
-docker-compose down -v
+docker-compose down
 ./scripts/rotate_db_password.sh
+rm -rf ./data/postgres ./data/redis ./data/torch_cache
 docker-compose up -d --build
 ```
 
@@ -279,14 +280,14 @@ docker-compose exec backend pytest
 docker-compose exec backend pip install <package>
 ```
 
-### View Volumes
+### View Data Directories
 
 ```bash
-# List all Docker volumes
-docker volume ls | grep segmentflow
+# List persisted data
+ls -la ./data
 
-# Inspect volume
-docker volume inspect segmentflow_postgres_data
+# Inspect database size
+du -sh ./data/postgres
 ```
 
 ## Troubleshooting
@@ -373,11 +374,14 @@ docker-compose logs backend
 ### Reset everything and start fresh
 
 ```bash
-# Stop and remove everything
-docker-compose down -v
+# Stop containers
+docker-compose down
 
 # Remove images (optional)
 docker rmi segmentflow-backend segmentflow-frontend
+
+# Remove persisted data
+rm -rf ./data/postgres ./data/redis ./data/torch_cache
 
 # Start fresh
 docker-compose up -d
@@ -395,11 +399,12 @@ docker-compose up -d
 
 Dependencies ensure services start in the correct order.
 
-### Volumes
+### Data Mounts
 
-Persistent volumes:
-- `postgres_data`: Stores PostgreSQL database files
-- `redis_data`: Stores Redis persistence files
+Persistent data directories:
+- `./data/postgres`: Stores PostgreSQL database files
+- `./data/redis`: Stores Redis persistence files
+- `./data/torch_cache`: Stores PyTorch model cache
 
 Bind mounts (for development):
 - `./backend:/app`: Live code reload for backend
@@ -429,7 +434,7 @@ See DEPLOY-001 in the project plan for production setup details.
 ## Notes
 
 - **Default credentials** (`segmentflow`/`segmentflow_dev_password`) are for development only
-- **Persistent volumes** survive container restarts but are deleted with `docker-compose down -v`
+- **Persistent data** lives in `./data` and survives reboots and container removal
 - **Network isolation** via `segmentflow-network` enables service-to-service communication
 - **Health checks** ensure services are ready before dependent services start
 - **Volume mounts** enable live code reloading during development

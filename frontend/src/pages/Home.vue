@@ -141,6 +141,7 @@ import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
 import { useUserSettingsStore } from '../stores/userSettings';
 import { useRouter } from 'vue-router';
+import { API_BASE_URL } from '../lib/api';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
@@ -197,7 +198,7 @@ const gradientStyle = (project: Project) => {
   return { background: `linear-gradient(135deg, ${from}, ${to})` };
 };
 
-const baseApi = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1';
+const baseApi = API_BASE_URL;
 
 const getThumbnailUrl = (projectId: string): string => {
   return `${baseApi}/projects/${projectId}/thumbnail`;

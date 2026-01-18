@@ -182,6 +182,7 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
+import { API_BASE_URL, buildWebSocketUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 
 interface Project {
@@ -228,7 +229,7 @@ const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
 const api = axios.create({ 
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1', 
+  baseURL: API_BASE_URL, 
   timeout: 30000 
 });
 
@@ -344,7 +345,7 @@ async function startPropagation(): Promise<void> {
 }
 
 function connectWebSocket(jobIdValue: string): void {
-  const wsUrl = `ws://localhost:8000/api/v1/projects/${projectId}/propagate/${jobIdValue}/ws`;
+  const wsUrl = buildWebSocketUrl(`/projects/${projectId}/propagate/${jobIdValue}/ws`);
   console.log('Connecting to propagation WebSocket:', wsUrl);
   
   websocket = new WebSocket(wsUrl);

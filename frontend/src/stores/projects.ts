@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { defineStore } from 'pinia';
+import { API_BASE_URL } from '../lib/api';
 
 export type ProjectStage =
   | 'upload'
@@ -28,9 +29,7 @@ interface ProjectListResponse {
 }
 
 const api = axios.create({
-  // Prefer explicit API URL when provided by environment (Docker dev: VITE_API_URL=http://backend:8000/api/v1)
-  // Otherwise use relative path for Vite proxy in local dev.
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 8000,
 });
 

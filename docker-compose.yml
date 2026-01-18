@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U segmentflow"]
       interval: 10s
@@ -26,7 +26,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -52,7 +52,7 @@ services:
       # Cache SAM3 model from Hugging Face (mount local cache)
       - ./backend/data/models:/root/.cache/huggingface/hub
       # Cache PyTorch models
-      - torch_cache:/root/.cache/torch
+      - ./data/torch_cache:/root/.cache/torch
     networks:
       - segmentflow-network
     secrets:
@@ -79,11 +79,6 @@ services:
       - "5173:5173"
     networks:
       - segmentflow-network
-
-volumes:
-  postgres_data:
-  redis_data:
-  torch_cache:
 
 networks:
   segmentflow-network:

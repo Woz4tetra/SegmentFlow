@@ -50,6 +50,7 @@ import { useProjectsStore } from '../stores/projects';
 import FileUpload from '../components/FileUpload.vue';
 import StageNavigation from '../components/StageNavigation.vue';
 import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 
 interface Project {
   id: string;
@@ -77,7 +78,7 @@ const conversionProgress = ref({ saved: 0, total: 0 });
 let conversionPollInterval: number | null = null;
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 30000,
 });
 

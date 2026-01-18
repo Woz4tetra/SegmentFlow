@@ -39,6 +39,7 @@
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 
 interface Project {
@@ -56,7 +57,7 @@ interface Project {
 const route = useRoute();
 const projectId = String(route.params.id ?? '');
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 20000,
 });
 

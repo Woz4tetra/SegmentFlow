@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { defineStore } from 'pinia';
+import { API_BASE_URL } from '../lib/api';
 
 export interface Label {
   id: string;
@@ -11,7 +12,7 @@ export interface Label {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 8000,
 });
 

@@ -19,4 +19,4 @@ Vue 3 + Vite app with Pinia and Vue Router.
 
 ## Backend Integration
 
-Configure API clients (e.g., Axios) to hit the backend at http://localhost:8000 during local dev. Add environment variables later using Vite's `.env` files if needed.
+API clients read `VITE_API_URL` when provided; otherwise they default to same-origin `/api/v1`. Set `VITE_API_URL` in Vite `.env` files or runtime env to point at a remote backend.
