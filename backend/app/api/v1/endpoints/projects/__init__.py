@@ -13,6 +13,7 @@ from .get_project import get_project
 from .get_thumbnail import get_thumbnail
 from .get_upload_progress import get_upload_progress
 from .init_video_upload import init_video_upload
+from .label_settings import list_project_label_settings, update_project_label_setting
 from .list_project_images import list_project_images
 from .list_projects import list_projects
 from .mark_stage_visited import mark_stage_visited
@@ -42,6 +43,7 @@ __all__ = [
     "get_thumbnail",
     "get_upload_progress",
     "init_video_upload",
+    "list_project_label_settings",
     "list_project_images",
     "list_projects",
     "mark_stage_visited",
@@ -51,6 +53,7 @@ __all__ = [
     "save_mask",
     "set_trim_range",
     "update_frame_validation",
+    "update_project_label_setting",
     "update_project",
     "upload_video_chunk",
     "video_info",

@@ -19,63 +19,100 @@
   </section>
 
   <section class="content">
-    <div class="trim-card">
-      <div v-if="loading" class="loading">Loading project & metadata…</div>
-      
-      <!-- Show progress bar while conversion is in progress -->
-      <div v-else-if="conversionInProgress" class="conversion-progress">
-        <p class="conversion-progress__title">Converting video to frames…</p>
-        <div class="conversion-progress__info">
-          <span>{{ conversionSaved }} / {{ conversionTotal }} frames</span>
-          <span class="conversion-progress__percent">{{ conversionPercent }}%</span>
+    <div class="trim-layout">
+      <div class="trim-card">
+        <div v-if="loading" class="loading">Loading project & metadata…</div>
+        
+        <!-- Show progress bar while conversion is in progress -->
+        <div v-else-if="conversionInProgress" class="conversion-progress">
+          <p class="conversion-progress__title">Converting video to frames…</p>
+          <div class="conversion-progress__info">
+            <span>{{ conversionSaved }} / {{ conversionTotal }} frames</span>
+            <span class="conversion-progress__percent">{{ conversionPercent }}%</span>
+          </div>
+          <div class="conversion-progress__bar">
+            <div class="conversion-progress__fill" :style="{ width: `${conversionPercent}%` }"></div>
+          </div>
         </div>
-        <div class="conversion-progress__bar">
-          <div class="conversion-progress__fill" :style="{ width: `${conversionPercent}%` }"></div>
+        
+        <div v-else>
+          <div class="preview-wrap">
+            <div class="preview">
+              <div class="preview__label">Start Preview</div>
+              <img :src="previewStartUrl" alt="Start preview" />
+            </div>
+            <div class="preview">
+              <div class="preview__label">End Preview</div>
+              <img :src="previewEndUrl" alt="End preview" />
+            </div>
+          </div>
+
+          <div v-if="duration > 0" class="controls">
+            <div class="time-labels">
+              <span>Start: <strong>{{ formatTime(startSec) }}</strong></span>
+              <span>End: <strong>{{ formatTime(endSec) }}</strong></span>
+            </div>
+            <DualRangeSlider
+              :min="0"
+              :max="duration"
+              :step="0.1"
+              :start-value="startSec"
+              :end-value="endSec"
+              @update:start-value="startSec = $event"
+              @update:end-value="endSec = $event"
+              @change="saveTrim"
+            />
+
+            <p class="hint" v-if="validationError">{{ validationError }}</p>
+
+            <div class="actions">
+              <button 
+                class="primary large" 
+                @click="startManualLabeling"
+                :disabled="!canStartLabeling"
+              >
+                Start Manual Labeling
+              </button>
+            </div>
+          </div>
+          <div v-else class="loading">Waiting for video metadata…</div>
         </div>
       </div>
-      
-      <div v-else>
-        <div class="preview-wrap">
-          <div class="preview">
-            <div class="preview__label">Start Preview</div>
-            <img :src="previewStartUrl" alt="Start preview" />
+
+      <aside class="trim-sidebar">
+        <div class="label-settings">
+          <div class="label-settings__header">
+            <div>
+              <h3>Label availability</h3>
+              <p class="label-settings__subtitle">
+                Enable labels for Manual Labeling and Validation.
+              </p>
+            </div>
           </div>
-          <div class="preview">
-            <div class="preview__label">End Preview</div>
-            <img :src="previewEndUrl" alt="End preview" />
+          <div v-if="labelSettingsLoading" class="loading">Loading labels…</div>
+          <div v-else-if="labelSettings.length === 0" class="label-settings__empty">
+            <p>No labels yet.</p>
+            <p class="hint">Create labels in the Labels page first.</p>
+          </div>
+          <div v-else class="label-settings__list">
+            <label v-for="label in labelSettings" :key="label.id" class="label-toggle">
+              <span class="label-info">
+                <span class="label-dot" :style="{ backgroundColor: label.color_hex }"></span>
+                <span class="label-name">{{ label.name }}</span>
+              </span>
+              <span class="toggle">
+                <input
+                  type="checkbox"
+                  :checked="label.enabled"
+                  @change="onLabelToggle(label, $event)"
+                />
+                <span class="toggle-track"></span>
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
           </div>
         </div>
-
-        <div v-if="duration > 0" class="controls">
-          <div class="time-labels">
-            <span>Start: <strong>{{ formatTime(startSec) }}</strong></span>
-            <span>End: <strong>{{ formatTime(endSec) }}</strong></span>
-          </div>
-          <DualRangeSlider
-            :min="0"
-            :max="duration"
-            :step="0.1"
-            :start-value="startSec"
-            :end-value="endSec"
-            @update:start-value="startSec = $event"
-            @update:end-value="endSec = $event"
-            @change="saveTrim"
-          />
-
-          <p class="hint" v-if="validationError">{{ validationError }}</p>
-
-          <div class="actions">
-            <button 
-              class="primary large" 
-              @click="startManualLabeling"
-              :disabled="!canStartLabeling"
-            >
-              Start Manual Labeling
-            </button>
-          </div>
-        </div>
-        <div v-else class="loading">Waiting for video metadata…</div>
-      </div>
+      </aside>
     </div>
   </section>
 </template>
@@ -105,6 +142,14 @@ interface Project {
   export_visited: boolean;
 }
 
+interface LabelSetting {
+  id: string;
+  name: string;
+  color_hex: string;
+  thumbnail_path: string | null;
+  enabled: boolean;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -124,6 +169,8 @@ const conversionSaved = ref(0);
 const conversionTotal = ref(0);
 const conversionInProgress = ref(false);
 let conversionPollInterval: number | null = null;
+const labelSettings = ref<LabelSetting[]>([]);
+const labelSettingsLoading = ref(false);
 
 const conversionPercent = computed(() => {
   if (conversionTotal.value === 0) return 0;
@@ -221,6 +268,39 @@ async function markStageVisited(): Promise<void> {
   }
 }
 
+async function fetchLabelSettings(): Promise<void> {
+  labelSettingsLoading.value = true;
+  try {
+    const { data } = await api.get<LabelSetting[]>(`/projects/${projectId}/label_settings`);
+    labelSettings.value = data || [];
+  } catch (error) {
+    console.error('Failed to load label settings:', error);
+    labelSettings.value = [];
+  } finally {
+    labelSettingsLoading.value = false;
+  }
+}
+
+async function onLabelToggle(label: LabelSetting, event: Event): Promise<void> {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+  const nextEnabled = target.checked;
+  const previous = label.enabled;
+  label.enabled = nextEnabled;
+  try {
+    const { data } = await api.patch<LabelSetting>(
+      `/projects/${projectId}/label_settings/${label.id}`,
+      { enabled: nextEnabled },
+    );
+    if (data) {
+      label.enabled = data.enabled;
+    }
+  } catch (error) {
+    label.enabled = previous;
+    console.error('Failed to update label setting:', error);
+  }
+}
+
 async function checkConversionProgress(): Promise<boolean> {
   try {
     const { data } = await api.get<{ saved: number; total: number; complete: boolean }>(`/projects/${projectId}/conversion/progress`);
@@ -275,6 +355,9 @@ onMounted(async () => {
     
     // Fetch video info FIRST to get duration and frame count
     await fetchVideoInfo();
+
+    // Load project label settings
+    await fetchLabelSettings();
     
     // Now check if we need to poll for conversion (only if no frame count found)
     if (conversionTotal.value === 0) {
@@ -324,8 +407,10 @@ onUnmounted(() => {
 h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .lede { margin: 0 0 0.75rem; color: var(--muted, #4b5563); line-height: 1.6; }
 
-.content { width: calc(100% - 2.5rem); max-width: 1400px; margin: 0 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.content { width: calc(100% - 2.5rem); max-width: 2100px; margin: 0 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.trim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 1rem; align-items: start; }
 .trim-card { width: 100%; border: 1px solid var(--border, #dfe3ec); border-radius: 16px; padding: 1.5rem; background: var(--surface, #ffffff); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
+.trim-sidebar { position: sticky; top: 1rem; }
 .preview-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
 .preview { background: var(--surface-elevated, var(--surface, #ffffff)); border: 1px solid var(--border, #dfe3ec); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
 .preview__label { color: var(--text, #0f172a); font-weight: 700; padding: 0.5rem 0.75rem; background: var(--surface, #ffffff); border-bottom: 1px solid var(--border, #dfe3ec); }
@@ -340,6 +425,112 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .ghost { background: var(--surface, #ffffff); border: 1px solid var(--border, #dfe3ec); color: var(--text, #0f172a); padding: 0.55rem 0.9rem; border-radius: 12px; font-weight: 600; cursor: pointer; }
 .loading { color: var(--muted, #6b7280); }
 .hint { color: #b91c1c; }
+
+.label-settings {
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 16px;
+  padding: 1.25rem;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.label-settings__header h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.label-settings__subtitle {
+  margin: 0;
+  color: var(--muted, #4b5563);
+  font-size: 0.9rem;
+}
+
+.label-settings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.label-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 12px;
+  background: var(--surface-elevated, var(--surface, #ffffff));
+  cursor: pointer;
+}
+
+.label-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.label-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--surface-muted, #e5e7eb);
+  transition: background 0.2s ease;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.toggle input:checked ~ .toggle-track {
+  background: #2563eb;
+}
+
+.toggle input:checked ~ .toggle-thumb {
+  transform: translateX(20px);
+}
+
+@media (max-width: 980px) {
+  .trim-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .trim-sidebar {
+    position: static;
+  }
+}
 
 /* Conversion progress styles */
 .conversion-progress {

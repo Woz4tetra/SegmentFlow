@@ -191,6 +191,22 @@ class LabelResponse(LabelBase):
     model_config = {"from_attributes": True}
 
 
+class ProjectLabelSettingUpdate(BaseModel):
+    """Schema for updating project label enable/disable."""
+
+    enabled: bool = Field(..., description="Whether label is enabled for the project")
+
+
+class ProjectLabelSettingResponse(BaseModel):
+    """Schema for project label settings response."""
+
+    id: UUID = Field(..., description="Label UUID")
+    name: str = Field(..., description="Label name")
+    color_hex: str = Field(..., description="Color in #RRGGBB format")
+    thumbnail_path: str | None = Field(default=None, description="Optional thumbnail URL")
+    enabled: bool = Field(..., description="Whether label is enabled for the project")
+
+
 # ===== Video Upload Schemas =====
 
 

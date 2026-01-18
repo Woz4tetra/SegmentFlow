@@ -226,13 +226,13 @@
               <h3>Active Label</h3>
               <span class="section-hint"><kbd>T</kbd> cycle</span>
             </div>
-            <div v-if="labels.length === 0" class="no-labels">
-              <p>No labels available</p>
-              <p class="hint">Create labels in the Labels page first</p>
+            <div v-if="enabledLabels.length === 0" class="no-labels">
+              <p>No enabled labels</p>
+              <p class="hint">Enable labels in the Trim stage or create new labels first</p>
             </div>
             <div v-else class="label-selector">
               <div 
-                v-for="label in labels" 
+                v-for="label in enabledLabels" 
                 :key="label.id"
                 :class="['label-option', { active: selectedLabel?.id === label.id }]"
               >
@@ -308,7 +308,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref, computed } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import StageNavigation from '../components/StageNavigation.vue';
@@ -345,6 +345,10 @@ interface Label {
   thumbnail_path: string | null;
 }
 
+interface LabelSetting extends Label {
+  enabled: boolean;
+}
+
 interface FrameStatusData {
   frame_number: number;
   status: string;
@@ -364,8 +368,8 @@ const api = axios.create({
 const loading = ref(true);
 const project = ref<Project | null>(null);
 const images = ref<ImageData[]>([]);
-const labels = ref<Label[]>([]);
-const selectedLabel = ref<Label | null>(null);
+const labels = ref<LabelSetting[]>([]);
+const selectedLabel = ref<LabelSetting | null>(null);
 const currentFrameNumber = ref(0);
 const totalFrames = ref(0);
 const frameInput = ref<number | null>(null);
@@ -379,6 +383,7 @@ const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Re
 const validationBusy = ref(false);
 
 const isValidationMode = computed(() => route.name === 'Validation');
+const enabledLabels = computed(() => labels.value.filter(label => label.enabled));
 
 const currentImage = computed(() => {
   if (images.value.length === 0) return null;
@@ -475,21 +480,30 @@ async function markStageVisited(): Promise<void> {
   }
 }
 
+function syncSelectedLabel(): void {
+  const enabled = enabledLabels.value;
+  if (enabled.length === 0) {
+    selectedLabel.value = null;
+    return;
+  }
+  if (!selectedLabel.value || !enabled.some(label => label.id === selectedLabel.value?.id)) {
+    selectedLabel.value = enabled[0];
+  }
+}
+
 async function fetchLabels(): Promise<void> {
   try {
-    console.log('Fetching labels');
-    const { data } = await api.get<Label[]>('/labels');
-    console.log('Fetched labels:', data.length);
+    console.log('Fetching project label settings');
+    const { data } = await api.get<LabelSetting[]>(
+      `/projects/${projectId}/label_settings`,
+    );
+    console.log('Fetched project labels:', data.length);
     labels.value = data || [];
-    
-    // Auto-select first label if available
-    if (labels.value.length > 0 && !selectedLabel.value) {
-      selectedLabel.value = labels.value[0];
-      console.log('Auto-selected first label:', selectedLabel.value.name);
-    }
+    syncSelectedLabel();
   } catch (error) {
     console.error('Failed to fetch labels:', error);
     labels.value = [];
+    selectedLabel.value = null;
   }
 }
 
@@ -524,22 +538,23 @@ async function setValidationStatus(status: 'passed' | 'failed'): Promise<void> {
   }
 }
 
-function selectLabel(label: Label): void {
+function selectLabel(label: LabelSetting): void {
   selectedLabel.value = label;
   console.log('Selected label:', label.name);
 }
 
 function cycleToNextLabel(): void {
-  if (labels.value.length === 0) return;
+  const enabled = enabledLabels.value;
+  if (enabled.length === 0) return;
   
   if (!selectedLabel.value) {
-    selectedLabel.value = labels.value[0];
+    selectedLabel.value = enabled[0];
     return;
   }
   
-  const currentIndex = labels.value.findIndex(l => l.id === selectedLabel.value?.id);
-  const nextIndex = (currentIndex + 1) % labels.value.length;
-  selectedLabel.value = labels.value[nextIndex];
+  const currentIndex = enabled.findIndex(l => l.id === selectedLabel.value?.id);
+  const nextIndex = (currentIndex + 1) % enabled.length;
+  selectedLabel.value = enabled[nextIndex];
   console.log('Switched to label:', selectedLabel.value.name);
 }
 
@@ -868,6 +883,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
+});
+
+watch(enabledLabels, () => {
+  syncSelectedLabel();
 });
 </script>
 
