@@ -146,6 +146,7 @@ class SamConfig:
     """
 
     model_path: str | None = None
+    max_num_gpus: int = 3
 
 
 @dataclass

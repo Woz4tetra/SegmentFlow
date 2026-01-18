@@ -2,59 +2,97 @@
 
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import Field, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from app.core.logging import get_logger
-from app.core.schema import Config, from_dict, to_dict
+from app.core.schema import Config, from_dict
 
 # Setup logging for this module
 logger = get_logger(__name__)
 
 
-class Settings(BaseSettings):
-    """Application settings.
+@dataclass
+class Settings:
+    """Unified application settings loaded from TOML."""
 
-    Loads configuration from:
-    1. TOML file (config.toml in config directory or current directory)
-    2. Environment variables
-    3. Default values
-    """
+    config: Config
 
-    model_config = SettingsConfigDict(
-        case_sensitive=True,
-        extra="ignore",
-    )
+    @property
+    def PROJECT_NAME(self) -> str:  # noqa: N802
+        return self.config.server.project_name
 
-    # Project metadata
-    PROJECT_NAME: str = "SegmentFlow"
-    VERSION: str = "0.1.0"
-    API_V1_STR: str = "/api/v1"
+    @property
+    def VERSION(self) -> str:  # noqa: N802
+        return self.config.server.version
 
-    # Database configuration
-    DATABASE_URL: str | None = Field(
-        default=None,
-        description=(
-            "Complete database URL. If not provided, it will be assembled from DB_* settings."
-        ),
-    )
-    DB_HOST: str = Field(default="localhost", description="Database host")
-    DB_PORT: int = Field(default=5432, description="Database port")
-    DB_NAME: str = Field(default="segmentflow", description="Database name")
-    DB_USER: str = Field(default="segmentflow", description="Database user")
-    DB_PASSWORD: str | None = Field(default=None, description="Database password")
-    DB_PASSWORD_FILE: str | None = Field(
-        default=None,
-        description="Path to file containing database password (e.g., /run/secrets/postgres_password)",
-    )
+    @property
+    def API_V1_STR(self) -> str:  # noqa: N802
+        return self.config.server.api_v1_str
 
-    # CORS configuration
-    CORS_ORIGINS: list[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173"],
-        description="Allowed CORS origins for frontend",
-    )
+    @property
+    def DEBUG(self) -> bool:  # noqa: N802
+        return self.config.server.debug
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:  # noqa: N802
+        return self.config.server.cors_origins
+
+    @property
+    def DATABASE_URL(self) -> str | None:  # noqa: N802
+        return self.config.database.url
+
+    @property
+    def DB_HOST(self) -> str:  # noqa: N802
+        return self.config.database.host
+
+    @property
+    def DB_PORT(self) -> int:  # noqa: N802
+        return self.config.database.port
+
+    @property
+    def DB_NAME(self) -> str:  # noqa: N802
+        return self.config.database.name
+
+    @property
+    def DB_USER(self) -> str:  # noqa: N802
+        return self.config.database.user
+
+    @property
+    def DB_PASSWORD(self) -> str | None:  # noqa: N802
+        return self.config.database.password
+
+    @property
+    def DB_PASSWORD_FILE(self) -> str | None:  # noqa: N802
+        return self.config.database.password_file
+
+    @property
+    def PROJECTS_ROOT_DIR(self) -> str:  # noqa: N802
+        return self.config.storage.projects_root_dir
+
+    @property
+    def SAM_MAX_NUM_GPUS(self) -> int | None:  # noqa: N802
+        return self.config.sam.max_num_gpus
+
+    @property
+    def MAX_PROPAGATION_LENGTH(self) -> int:  # noqa: N802
+        return self.config.processing.max_propagation_length
+
+    @property
+    def INFERENCE_WIDTH(self) -> int:  # noqa: N802
+        return self.config.processing.inference_width
+
+    @property
+    def OUTPUT_WIDTH(self) -> int:  # noqa: N802
+        return self.config.processing.output_width
+
+    @property
+    def MASK_TRANSPARENCY(self) -> float:  # noqa: N802
+        return self.config.processing.mask_transparency
+
+    @property
+    def BIG_JUMP_SIZE(self) -> int:  # noqa: N802
+        return self.config.processing.big_jump_size
 
     def get_database_url(self) -> str:
         """Return the effective database URL.
@@ -81,46 +119,6 @@ class Settings(BaseSettings):
 
         return f"postgresql+asyncpg://{self.DB_USER}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
-    # Server configuration
-    DEBUG: bool = Field(default=True, description="Debug mode")
-
-    # File storage
-    PROJECTS_ROOT_DIR: str = Field(
-        default="./data/projects",
-        description="Root directory for project files",
-    )
-
-    # SAM configuration
-    SAM_MAX_NUM_GPUS: int | None = Field(
-        default=None,
-        description="Maximum number of GPUs to use for parallel SAM3 propagation. If not set, uses all available GPUs detected by pynvml. Set to 0 for CPU-only.",
-    )
-
-    # Processing configuration
-    MAX_PROPAGATION_LENGTH: int = Field(
-        default=1000,
-        description="Maximum number of frames to propagate in one batch",
-    )
-    INFERENCE_WIDTH: int = Field(
-        default=1024,
-        description="Width for SAM inference images (smaller = faster, less memory)",
-    )
-    OUTPUT_WIDTH: int = Field(
-        default=1920,
-        description="Width for output images",
-    )
-    MASK_TRANSPARENCY: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Transparency level for mask overlays",
-    )
-    BIG_JUMP_SIZE: int = Field(
-        default=500,
-        description="Number of frames to jump with 'big jump' navigation",
-    )
-
-
 def _load_toml_config() -> Config:
     """Load and parse configuration from TOML file with validation.
 
@@ -135,28 +133,30 @@ def _load_toml_config() -> Config:
     Raises:
         ValueError: If TOML file exists but cannot be parsed or validated
     """
+    module_root = Path(__file__).resolve().parents[2]
     config_locations = [
-        Path.home() / ".config" / "segmentflow" / "config.toml",
+        module_root / "config.toml",
         Path("config.toml"),
     ]
 
     for config_path in config_locations:
-        if config_path.exists():
-            try:
-                with open(config_path, "rb") as f:
-                    toml_data = tomllib.load(f)
+        if not config_path.exists():
+            continue
+        try:
+            with open(config_path, "rb") as f:
+                toml_data = tomllib.load(f)
 
-                # Validate TOML structure using schema
-                try:
-                    config = from_dict(Config, toml_data)
-                    logger.info(f"Loaded and validated configuration from {config_path}")
-                    return config
-                except Exception as e:
-                    raise ValueError(f"Configuration validation failed: {e}") from e
-            except (tomllib.TOMLDecodeError, OSError) as e:
-                raise ValueError(
-                    f"Failed to parse TOML configuration file at {config_path}: {e}"
-                ) from e
+            # Validate TOML structure using schema
+            try:
+                config = from_dict(Config, toml_data)
+                logger.info(f"Loaded and validated configuration from {config_path}")
+                return config
+            except Exception as e:
+                raise ValueError(f"Configuration validation failed: {e}") from e
+        except (tomllib.TOMLDecodeError, OSError) as e:
+            raise ValueError(
+                f"Failed to parse TOML configuration file at {config_path}: {e}"
+            ) from e
 
     # No config file found - return default configuration
     return Config()
@@ -171,7 +171,6 @@ def _create_settings() -> Settings:
 
     Raises:
         ValueError: If TOML file exists but cannot be parsed
-        ValidationError: If configuration values fail Pydantic validation
     """
     try:
         toml_config = _load_toml_config()
@@ -179,15 +178,11 @@ def _create_settings() -> Settings:
         logger.error(f"Configuration error: {e}")
         raise
 
-    try:
-        return Settings(**to_dict(toml_config))
-    except ValidationError as e:
-        logger.error(f"Configuration validation error: {e}")
-        raise
+    return Settings(toml_config)
 
 
 try:
     settings = _create_settings()
-except (ValueError, ValidationError) as e:
+except ValueError as e:
     logger.error(f"Failed to load configuration: {e}")
     sys.exit(1)

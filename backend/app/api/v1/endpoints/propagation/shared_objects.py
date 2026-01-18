@@ -253,14 +253,14 @@ def build_propagation_segments(
             prev_frame = frame
 
         segments.append(
-            PropagationSegment(
-                start_frame=start_frame,
+                PropagationSegment(
+                        start_frame=start_frame,
                 end_frame=prev_frame,
-                source_frame=labeled_frame,
+                        source_frame=labeled_frame,
                 direction="forward",
                 num_frames=prev_frame - start_frame + 1,
-            )
-        )
+                    )
+                )
 
     return segments
 
@@ -296,8 +296,8 @@ async def analyze_propagation_segments(
     if bounds:
         start_frame, end_frame = bounds
         images = [img for img in images if start_frame <= img.frame_number <= end_frame]
-        if not images:
-            return [], []
+    if not images:
+        return [], []
 
     # Get labeled frames
     labeled_frame_numbers, labeled_images = await get_labeled_frames(project_id, db)

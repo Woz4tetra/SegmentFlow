@@ -12,9 +12,9 @@ from app.api.v1.schemas import LabeledPointResponse, SaveLabeledPointsRequest
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.trim_utils import is_frame_in_trim
 from app.core.sam3_state import get_primary_tracker
 from app.core.sam3_tracker import SAM3Tracker
+from app.core.trim_utils import is_frame_in_trim
 from app.models.image import Image
 from app.models.label import Label
 from app.models.labeled_point import LabeledPoint

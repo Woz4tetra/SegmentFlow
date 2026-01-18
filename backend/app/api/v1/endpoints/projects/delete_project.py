@@ -1,7 +1,7 @@
 """Delete a project and its associated data."""
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status

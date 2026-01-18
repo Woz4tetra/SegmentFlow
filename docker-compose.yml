@@ -45,21 +45,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: segmentflow
-      DB_USER: segmentflow
-      DB_PASSWORD_FILE: /run/secrets/postgres_password
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: development
-      DEBUG: "True"
-      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "http://frontend:5173"]'
-      # Set Hugging Face home to use mounted cache
-      HF_HOME: /root/.cache/huggingface
-      # HuggingFace token for accessing gated models like SAM3
-      # Set this in your .env file: HF_TOKEN=your_token_here
-      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:

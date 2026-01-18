@@ -66,15 +66,15 @@
           />
           <div class="thumb__top">
             <div class="thumb__badges">
-              <span
-                class="stage"
-                :data-tone="toneForStage(effectiveStage(project))"
-              >
-                {{ labelForStage(effectiveStage(project)) }}
-              </span>
-              <span class="status" :data-active="project.active">
-                {{ project.active ? 'Active' : 'Archived' }}
-              </span>
+            <span
+              class="stage"
+              :data-tone="toneForStage(effectiveStage(project))"
+            >
+              {{ labelForStage(effectiveStage(project)) }}
+            </span>
+            <span class="status" :data-active="project.active">
+              {{ project.active ? 'Active' : 'Archived' }}
+            </span>
             </div>
             <div class="card-menu" @click.stop>
               <button
@@ -218,7 +218,7 @@ const effectiveStage = (project: Project): ProjectStage => {
   return project.stage;
 };
 
-const isStageAvailable = (stage: ProjectStage): boolean =>
+const isStageAvailable = (stage: ProjectStage): boolean => 
   stage === 'upload' ||
   stage === 'trim' ||
   stage === 'manual_labeling' ||
