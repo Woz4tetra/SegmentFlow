@@ -738,6 +738,11 @@ async function goToPropagation(): Promise<void> {
     // Mark propagation stage as visited before navigating
     const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=propagation`);
     project.value = data;
+    // Ensure stage is set to propagation for nav state
+    const stageResponse = await api.patch<Project>(`/projects/${projectId}`, { stage: 'propagation' });
+    if (stageResponse.data) {
+      project.value = stageResponse.data;
+    }
   } catch (error) {
     console.error('Failed to mark propagation stage as visited:', error);
   }

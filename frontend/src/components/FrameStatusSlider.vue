@@ -331,6 +331,7 @@ function handleTrackHover(event: MouseEvent): void {
 
 .segment.manual {
   background: linear-gradient(135deg, #2563eb, #3b82f6);
+  min-width: 2px;
 }
 
 .segment.propagated {

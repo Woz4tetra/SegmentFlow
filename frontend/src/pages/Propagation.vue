@@ -225,6 +225,15 @@ interface PropagationStats {
   labels: number;
 }
 
+interface PropagationStatusResponse {
+  job_id: string;
+  project_id: string;
+  status: string;
+  progress: PropagationProgress | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -240,6 +249,8 @@ const jobStatus = ref<string | null>(null);
 const progress = ref<PropagationProgress | null>(null);
 const stats = ref<PropagationStats | null>(null);
 const starting = ref(false);
+
+const jobStorageKey = `segmentflow:propagationJob:${projectId}`;
 
 // Notification state
 const showNotification = ref(false);
@@ -329,6 +340,7 @@ async function startPropagation(): Promise<void> {
     
     jobId.value = data.job_id;
     jobStatus.value = data.status;
+    sessionStorage.setItem(jobStorageKey, data.job_id);
     
     // Connect to WebSocket for progress updates
     connectWebSocket(data.job_id);
@@ -341,6 +353,30 @@ async function startPropagation(): Promise<void> {
     );
   } finally {
     starting.value = false;
+  }
+}
+
+async function restorePropagationJob(): Promise<void> {
+  const storedJobId = sessionStorage.getItem(jobStorageKey);
+  if (!storedJobId) return;
+
+  try {
+    const { data } = await api.get<PropagationStatusResponse>(
+      `/projects/${projectId}/propagate/${storedJobId}`,
+    );
+    jobId.value = data.job_id;
+    jobStatus.value = data.status;
+    progress.value = data.progress ?? null;
+
+    if (data.status === 'running' || data.status === 'queued') {
+      connectWebSocket(data.job_id);
+    }
+  } catch (error) {
+    console.warn('Stored propagation job not found, clearing cache.', error);
+    sessionStorage.removeItem(jobStorageKey);
+    jobId.value = null;
+    jobStatus.value = null;
+    progress.value = null;
   }
 }
 
@@ -421,6 +457,7 @@ function goToValidation(): void {
 }
 
 function retryPropagation(): void {
+  sessionStorage.removeItem(jobStorageKey);
   jobId.value = null;
   jobStatus.value = null;
   progress.value = null;
@@ -445,6 +482,7 @@ onMounted(async () => {
     await fetchProject();
     await fetchStats();
     await markStageVisited();
+    await restorePropagationJob();
   } catch (error) {
     console.error('Failed during initialization:', error);
   }
