@@ -88,8 +88,18 @@ async def export_yolo(
         images_dir.mkdir(parents=True, exist_ok=True)
         labels_dir.mkdir(parents=True, exist_ok=True)
 
-        classes_path = export_dir / "classes.txt"
-        classes_path.write_text("\n".join([label.name for label in labels]), encoding="utf-8")
+        data_path = export_dir / "data.yml"
+        data_lines = [
+            "names:",
+            *[f"- {label.name}" for label in labels],
+            "colors:",
+            *[f"- \"{label.color_hex}\"" for label in labels],
+            f"nc: {len(labels)}",
+            "test: ../test/images",
+            "train: ../train/images",
+            "val: ../val/images",
+        ]
+        data_path.write_text("\n".join(data_lines), encoding="utf-8")
 
         for image in images:
             image_rel = image.output_path or image.inference_path
