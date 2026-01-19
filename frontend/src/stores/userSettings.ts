@@ -12,6 +12,7 @@ export interface UserSettings {
   theme: Theme;
   visible_columns: ColumnVisibility;
   column_order: string[];
+  export_skip_n: number;
 }
 
 // Cookie helper functions
@@ -53,6 +54,7 @@ const defaultSettings: UserSettings = {
     video: true,
   },
   column_order: ['created', 'updated', 'video'],
+  export_skip_n: 1,
 };
 
 export const useUserSettingsStore = defineStore('userSettings', {
@@ -65,6 +67,7 @@ export const useUserSettingsStore = defineStore('userSettings', {
         ...savedSettings.visible_columns,
       },
       column_order: savedSettings.column_order ?? defaultSettings.column_order,
+      export_skip_n: savedSettings.export_skip_n ?? defaultSettings.export_skip_n,
     };
   },
   actions: {
@@ -92,11 +95,18 @@ export const useUserSettingsStore = defineStore('userSettings', {
       this.column_order = order;
       this.persistToCookie();
     },
+
+    setExportSkipN(value: number) {
+      const normalized = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+      this.export_skip_n = normalized;
+      this.persistToCookie();
+    },
     
     resetToDefaults() {
       this.theme = defaultSettings.theme;
       this.visible_columns = { ...defaultSettings.visible_columns };
       this.column_order = [...defaultSettings.column_order];
+      this.export_skip_n = defaultSettings.export_skip_n;
       this.persistToCookie();
     },
     
@@ -105,6 +115,7 @@ export const useUserSettingsStore = defineStore('userSettings', {
         theme: this.theme,
         visible_columns: this.visible_columns,
         column_order: this.column_order,
+        export_skip_n: this.export_skip_n,
       });
     },
   },

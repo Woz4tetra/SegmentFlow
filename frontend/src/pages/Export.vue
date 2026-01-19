@@ -41,6 +41,7 @@ import { useRoute } from 'vue-router';
 import axios from 'axios';
 import { API_BASE_URL, buildApiUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
+import { useUserSettingsStore } from '../stores/userSettings';
 
 interface Project {
   id: string;
@@ -65,6 +66,7 @@ const loading = ref(true);
 const downloading = ref(false);
 const error = ref('');
 const project = ref<Project | null>(null);
+const userSettings = useUserSettingsStore();
 
 async function fetchProject(): Promise<void> {
   const { data } = await api.get<Project>(`/projects/${projectId}`);
@@ -89,7 +91,8 @@ async function downloadExport(): Promise<void> {
   downloading.value = true;
   error.value = '';
   try {
-    const url = buildApiUrl(`/projects/${projectId}/export/yolo`);
+    const skipParam = userSettings.export_skip_n > 1 ? `?skip_n=${userSettings.export_skip_n}` : '';
+    const url = buildApiUrl(`/projects/${projectId}/export/yolo${skipParam}`);
     const link = document.createElement('a');
     link.href = url;
     link.setAttribute('download', '');

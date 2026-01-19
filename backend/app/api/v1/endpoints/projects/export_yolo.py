@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 import cv2
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,7 @@ def _cleanup_export(path: Path) -> None:
 @router.get("/projects/{project_id}/export/yolo")
 async def export_yolo(
     project_id: UUID,
+    skip_n: int = Query(1, ge=1, description="Skip every Nth frame in export"),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     """Export project images and YOLO labels as a ZIP."""
@@ -101,7 +102,9 @@ async def export_yolo(
         ]
         data_path.write_text("\n".join(data_lines), encoding="utf-8")
 
-        for image in images:
+        for idx, image in enumerate(images):
+            if skip_n > 1 and idx % skip_n != 0:
+                continue
             image_rel = image.output_path or image.inference_path
             if not image_rel:
                 continue
