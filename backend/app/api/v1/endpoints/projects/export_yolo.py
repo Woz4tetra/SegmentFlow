@@ -105,7 +105,7 @@ async def export_yolo(
         for idx, image in enumerate(images):
             if skip_n > 1 and idx % skip_n != 0:
                 continue
-            if image.validation != ValidationStatus.PASSED.value:
+            if image.validation != ValidationStatus.PASSED.value and not image.manually_labeled:
                 continue
             image_rel = image.output_path or image.inference_path
             if not image_rel:
