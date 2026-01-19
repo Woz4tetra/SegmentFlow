@@ -39,7 +39,7 @@
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, buildApiUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 
 interface Project {
@@ -89,21 +89,15 @@ async function downloadExport(): Promise<void> {
   downloading.value = true;
   error.value = '';
   try {
-    const { data, headers } = await api.get(`/projects/${projectId}/export/yolo`, {
-      responseType: 'blob',
-    });
-    const blob = new Blob([data], { type: 'application/zip' });
-    const url = window.URL.createObjectURL(blob);
+    const url = buildApiUrl(`/projects/${projectId}/export/yolo`);
     const link = document.createElement('a');
-    const contentDisposition = headers['content-disposition'] || '';
-    const match = /filename="?([^"]+)"?/.exec(contentDisposition);
-    const fileName = match?.[1] ?? `${project.value?.name ?? 'export'}_export.zip`;
     link.href = url;
-    link.setAttribute('download', fileName);
+    link.setAttribute('download', '');
+    link.setAttribute('rel', 'noopener');
+    link.setAttribute('target', '_blank');
     document.body.appendChild(link);
     link.click();
     link.remove();
-    window.URL.revokeObjectURL(url);
   } catch (err) {
     error.value = 'Failed to download export. Please try again.';
   } finally {
