@@ -5,6 +5,7 @@ used across all propagation endpoints.
 """
 
 import asyncio
+import threading
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
@@ -24,7 +25,7 @@ from app.api.v1.schemas import (
 )
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.sam3_state import get_primary_tracker
+from app.core.sam3_state import get_all_trackers, get_primary_tracker
 from app.core.trim_utils import get_trim_frame_bounds
 from app.models.image import Image, ValidationStatus
 from app.models.labeled_point import LabeledPoint
@@ -433,7 +434,8 @@ def create_progress_callback(
     segment: PropagationSegment,
     segments: list[PropagationSegment],
     total_frames: int,
-    frames_completed_ref: list[int],
+    progress_state: dict[str, Any],
+    progress_lock: threading.Lock,
     start_time: float,
     loop: asyncio.AbstractEventLoop,
 ) -> Callable[[int, float], None]:
@@ -457,7 +459,13 @@ def create_progress_callback(
 
     def progress_callback(frame_idx: int, progress: float) -> None:
         elapsed = time.perf_counter() - start_time
-        frames_done = frames_completed_ref[0] + int(progress * segment.num_frames)
+        with progress_lock:
+            progress_state["segment_progress"][seg_idx] = progress
+            in_progress_frames = sum(
+                int(segments[idx].num_frames * seg_progress)
+                for idx, seg_progress in progress_state["segment_progress"].items()
+            )
+            frames_done = progress_state["completed_frames"] + in_progress_frames
         rate = frames_done / elapsed if elapsed > 0 else 1
         remaining = (total_frames - frames_done) / rate if rate > 0 else 0
 
@@ -497,7 +505,8 @@ async def process_segment(
     project_id: uuid.UUID,
     job: dict[str, Any],
     total_frames: int,
-    frames_completed_ref: list[int],
+    progress_state: dict[str, Any],
+    progress_lock: threading.Lock,
     start_time: float,
     tracker: Any,
     db_factory: Callable[[], AsyncGenerator[AsyncSession, None]],
@@ -560,7 +569,8 @@ async def process_segment(
         segment,
         segments,
         total_frames,
-        frames_completed_ref,
+        progress_state,
+        progress_lock,
         start_time,
         loop,
     )
@@ -593,8 +603,6 @@ async def process_segment(
         await db.close()
         return  # Only process one session
 
-    frames_completed_ref[0] += segment.num_frames
-
 
 async def run_propagation_job(
     job_id: str,
@@ -617,13 +625,18 @@ async def run_propagation_job(
     job["started_at"] = datetime.utcnow()
 
     total_frames = sum(seg.num_frames for seg in segments)
-    frames_completed_ref = [0]  # Use list for mutable reference
+    progress_state = {"completed_frames": 0, "segment_progress": {}}
+    progress_lock = threading.Lock()
     start_time = time.perf_counter()
 
     try:
-        # Get SAM3 tracker
-        tracker = get_primary_tracker()
-        if tracker is None:
+        # Get SAM3 trackers (one per GPU)
+        trackers = get_all_trackers()
+        if not trackers:
+            primary_tracker = get_primary_tracker()
+            if primary_tracker is not None:
+                trackers = {primary_tracker.gpu_id: primary_tracker}
+        if not trackers:
             raise RuntimeError("SAM3 model not initialized")
 
         # Get project directory
@@ -633,29 +646,71 @@ async def run_propagation_job(
         if not inference_dir.exists():
             raise RuntimeError(f"Inference directory not found: {inference_dir}")
 
-        # Set images directory for tracker
-        tracker.set_images_dir(str(inference_dir))
-
         # Build lookup for source frame data
         source_data_by_frame = {sf["frame_number"]: sf for sf in source_frames_data}
 
-        # Process each segment
+        segment_queue: asyncio.Queue[tuple[int, PropagationSegment] | None] = asyncio.Queue()
         for seg_idx, segment in enumerate(segments):
-            await process_segment(
-                segment,
-                seg_idx,
-                segments,
-                source_data_by_frame,
-                job_id,
-                project_id,
-                job,
-                total_frames,
-                frames_completed_ref,
-                start_time,
-                tracker,
-                db_factory,
-            )
-            frames_completed_ref[0] += segment.num_frames
+            await segment_queue.put((seg_idx, segment))
+
+        error_event = asyncio.Event()
+        error_ref: dict[str, Exception | None] = {"exc": None}
+
+        async def worker(tracker_id: int, tracker: Any) -> None:
+            tracker.set_images_dir(str(inference_dir))
+            while True:
+                item = await segment_queue.get()
+                if item is None:
+                    segment_queue.task_done()
+                    break
+
+                seg_idx, segment = item
+                if error_event.is_set():
+                    segment_queue.task_done()
+                    continue
+
+                try:
+                    await process_segment(
+                        segment,
+                        seg_idx,
+                        segments,
+                        source_data_by_frame,
+                        job_id,
+                        project_id,
+                        job,
+                        total_frames,
+                        progress_state,
+                        progress_lock,
+                        start_time,
+                        tracker,
+                        db_factory,
+                    )
+                    with progress_lock:
+                        progress_state["segment_progress"].pop(seg_idx, None)
+                        progress_state["completed_frames"] += segment.num_frames
+                except Exception as exc:
+                    logger.error(
+                        f"Propagation segment {seg_idx + 1} failed on tracker {tracker_id}: {exc}",
+                        exc_info=True,
+                    )
+                    if not error_event.is_set():
+                        error_ref["exc"] = exc
+                        error_event.set()
+                finally:
+                    segment_queue.task_done()
+
+        worker_tasks = [
+            asyncio.create_task(worker(tracker_id, tracker))
+            for tracker_id, tracker in trackers.items()
+        ]
+
+        await segment_queue.join()
+        for _ in worker_tasks:
+            await segment_queue.put(None)
+        await asyncio.gather(*worker_tasks)
+
+        if error_event.is_set() and error_ref["exc"] is not None:
+            raise error_ref["exc"]
 
         # Job completed successfully
         job["status"] = "completed"
@@ -695,6 +750,13 @@ async def run_propagation_job(
         job["status"] = "failed"
         job["error"] = str(e)
 
+        with progress_lock:
+            in_progress_frames = sum(
+                int(segments[idx].num_frames * seg_progress)
+                for idx, seg_progress in progress_state["segment_progress"].items()
+            )
+            frames_done = progress_state["completed_frames"] + in_progress_frames
+
         error_update = PropagationProgressUpdate(
             job_id=job_id,
             project_id=project_id,
@@ -702,9 +764,9 @@ async def run_propagation_job(
             current_segment=0,
             total_segments=len(segments),
             current_frame=0,
-            frames_completed=frames_completed_ref[0],
+            frames_completed=frames_done,
             total_frames=total_frames,
-            progress_percent=(frames_completed_ref[0] / total_frames) * 100
+            progress_percent=(frames_done / total_frames) * 100
             if total_frames > 0
             else 0,
             estimated_remaining_ms=0,
