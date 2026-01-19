@@ -19,4 +19,4 @@ Vue 3 + Vite app with Pinia and Vue Router.
 
 ## Backend Integration
 
-API clients read `VITE_API_URL` when provided; otherwise they default to same-origin `/api/v1`. Set `VITE_API_URL` in Vite `.env` files or runtime env to point at a remote backend.
+API clients read `VITE_API_URL` when provided; otherwise they default to same-origin `/api/v1`. Set `VITE_API_URL` in Vite `.env` files or Docker build args to point at a remote backend URL that the browser can reach.

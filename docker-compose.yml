@@ -70,11 +70,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
     container_name: segmentflow-frontend
     depends_on:
       - backend
-    environment:
-      VITE_API_URL: http://backend:8000/api/v1
     ports:
       - "5173:5173"
     networks:

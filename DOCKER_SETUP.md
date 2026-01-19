@@ -116,8 +116,8 @@ segmentflow-frontend       segmentflow-frontend      Up (healthy)
 ### Frontend Service
 
 **Image**: Built from `frontend/Dockerfile` (multi-stage Node.js build)  
-**Environment Variables**:
-- `VITE_API_URL`: Points to backend container at `http://backend:8000/api/v1`
+**Build-time Variables**:
+- `VITE_API_URL`: Public API base for the browser (e.g. `http://localhost:8000/api/v1` or your remote host URL)
 
 **Features**:
 - Built with Vite for fast development
@@ -365,10 +365,8 @@ docker-compose ps backend
 # Check backend logs
 docker-compose logs backend
 
-# Verify VITE_API_URL in frontend service
-# Should be: http://backend:8000/api/v1 (internal)
-
-# Or if running locally, use: http://localhost:8000/api/v1
+# Verify VITE_API_URL used at build time
+# Example: http://localhost:8000/api/v1 or your remote host URL
 ```
 
 ### Reset everything and start fresh
