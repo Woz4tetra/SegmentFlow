@@ -223,8 +223,9 @@ class VideoUploadChunkRequest(BaseModel):
     chunk_number: int = Field(..., ge=0, description="Sequential chunk number (0-indexed)")
     total_chunks: int = Field(..., gt=0, description="Total number of chunks")
     chunk_size: int = Field(..., gt=0, description="Size of this chunk in bytes")
-    file_hash: str = Field(
-        ..., min_length=64, max_length=64, description="SHA-256 hash of complete file"
+    file_hash: str | None = Field(
+        default=None,
+        description="Optional SHA-256 hash of complete file for integrity verification",
     )
 
 

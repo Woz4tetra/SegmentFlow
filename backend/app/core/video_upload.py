@@ -94,11 +94,12 @@ class VideoUploadService:
         temp_dir = self.temp_base_dir / session_key
         temp_dir.mkdir(parents=True, exist_ok=True)
 
+        normalized_hash = (file_hash or "").strip().lower()
         session = UploadSession(
             project_id=session_key,
             total_chunks=total_chunks,
             total_size=total_size,
-            file_hash=file_hash,
+            file_hash=normalized_hash,
             temp_dir=temp_dir,
             chunks_received=0,
             original_name=original_name,
@@ -247,14 +248,20 @@ class VideoUploadService:
 
             # Verify file hash
             logger.info(f"Verifying file integrity for project {project_id}")
-            file_hash = self._compute_file_hash(output_path)
-            if file_hash != session.file_hash:
-                output_path.unlink()  # Delete corrupted file
-                logger.error(
-                    f"Hash mismatch for {project_id}: expected {session.file_hash}, got {file_hash}"
-                )
-                raise RuntimeError(
-                    f"File hash mismatch. Expected {session.file_hash}, got {file_hash}"
+            if session.file_hash and len(session.file_hash) == 64:
+                file_hash = self._compute_file_hash(output_path)
+                if file_hash != session.file_hash:
+                    output_path.unlink()  # Delete corrupted file
+                    logger.error(
+                        f"Hash mismatch for {project_id}: expected {session.file_hash}, got {file_hash}"
+                    )
+                    raise RuntimeError(
+                        f"File hash mismatch. Expected {session.file_hash}, got {file_hash}"
+                    )
+            else:
+                logger.warning(
+                    f"Skipping hash verification for project {project_id}: "
+                    "client did not provide a valid SHA-256 hash."
                 )
 
             logger.info(f"Successfully finalized upload for project {project_id}: {output_path}")

@@ -18,7 +18,7 @@ async def init_video_upload(
     project_id: UUID,
     total_chunks: int,
     total_size: int,
-    file_hash: str,
+    file_hash: str | None = None,
     original_name: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -32,7 +32,7 @@ async def init_video_upload(
         project_id: ID of the project to upload video to
         total_chunks: Total number of chunks that will be uploaded
         total_size: Total size of the video file in bytes
-        file_hash: file hash of the complete file for integrity verification
+        file_hash: file hash of the complete file for integrity verification (SHA-256)
         db: Database session dependency
 
     Returns:
@@ -57,7 +57,7 @@ async def init_video_upload(
             str(project_id),
             total_chunks,
             total_size,
-            file_hash,
+            file_hash or "",
             original_name,
         )
 

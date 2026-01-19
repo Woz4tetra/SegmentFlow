@@ -110,15 +110,6 @@ async function markStageVisited(): Promise<void> {
   }
 }
 
-function fnv1aHash(bytes: Uint8Array): string {
-  let hash = 0x811c9dc5;
-  for (const byte of bytes) {
-    hash ^= byte;
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 async function computeFileHash(file: File): Promise<string> {
   console.log('Computing file hash...');
   const buffer = await file.arrayBuffer();
@@ -131,10 +122,9 @@ async function computeFileHash(file: File): Promise<string> {
     return hashHex;
   }
 
-  // Fallback for non-secure contexts where SubtleCrypto is unavailable.
-  const fallbackHash = fnv1aHash(new Uint8Array(buffer));
-  console.warn('SubtleCrypto unavailable; using non-crypto hash:', fallbackHash);
-  return fallbackHash;
+  // SubtleCrypto is unavailable in non-secure contexts; skip hash verification.
+  console.warn('SubtleCrypto unavailable; skipping file hash verification.');
+  return '';
 }
 
 // Upload file in chunks to backend
