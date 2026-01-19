@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.trim_utils import get_trim_frame_bounds
-from app.models.image import Image
+from app.models.image import Image, ValidationStatus
 from app.models.label import Label
 from app.models.mask import Mask
 from app.models.project import Project
@@ -104,6 +104,8 @@ async def export_yolo(
 
         for idx, image in enumerate(images):
             if skip_n > 1 and idx % skip_n != 0:
+                continue
+            if image.validation != ValidationStatus.PASSED.value:
                 continue
             image_rel = image.output_path or image.inference_path
             if not image_rel:
