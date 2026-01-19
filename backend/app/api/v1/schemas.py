@@ -670,6 +670,7 @@ class PropagationSegment(BaseModel):
         start_frame: Starting frame number (inclusive)
         end_frame: Ending frame number (inclusive)
         source_frame: The manually labeled frame to propagate from
+        anchor_frame: Optional second labeled frame used as an anchor
         direction: 'forward' or 'backward' propagation direction
         num_frames: Total number of frames in this segment
     """
@@ -677,6 +678,11 @@ class PropagationSegment(BaseModel):
     start_frame: int = Field(..., ge=0, description="Start frame (inclusive)")
     end_frame: int = Field(..., ge=0, description="End frame (inclusive)")
     source_frame: int = Field(..., ge=0, description="Source frame to propagate from")
+    anchor_frame: int | None = Field(
+        None,
+        ge=0,
+        description="Optional second labeled frame to anchor propagation",
+    )
     direction: str = Field(..., description="'forward' or 'backward'")
     num_frames: int = Field(..., ge=1, description="Number of frames in segment")
 

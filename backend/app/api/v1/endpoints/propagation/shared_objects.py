@@ -208,9 +208,15 @@ def build_propagation_segments(
     segments: list[PropagationSegment] = []
 
     for i, labeled_frame in enumerate(labeled_frame_numbers):
+        interval_anchor_frame: int | None = None
         if i < len(labeled_frame_numbers) - 1:
             next_labeled = labeled_frame_numbers[i + 1]
             end_frame = min(labeled_frame + max_propagation_length, next_labeled - 1)
+            if (
+                end_frame == next_labeled - 1
+                and (next_labeled - labeled_frame) <= settings.BIG_JUMP_SIZE + 1
+            ):
+                interval_anchor_frame = next_labeled
         else:
             end_frame = min(labeled_frame + max_propagation_length, max_frame)
 
@@ -241,11 +247,15 @@ def build_propagation_segments(
             if frame == prev_frame + 1:
                 prev_frame = frame
                 continue
+            segment_anchor_frame = (
+                interval_anchor_frame if prev_frame == end_frame else None
+            )
             segments.append(
                 PropagationSegment(
                     start_frame=start_frame,
                     end_frame=prev_frame,
                     source_frame=labeled_frame,
+                    anchor_frame=segment_anchor_frame,
                     direction="forward",
                     num_frames=prev_frame - start_frame + 1,
                 )
@@ -253,11 +263,13 @@ def build_propagation_segments(
             start_frame = frame
             prev_frame = frame
 
+        segment_anchor_frame = interval_anchor_frame if prev_frame == end_frame else None
         segments.append(
                 PropagationSegment(
                         start_frame=start_frame,
                 end_frame=prev_frame,
                         source_frame=labeled_frame,
+                        anchor_frame=segment_anchor_frame,
                 direction="forward",
                 num_frames=prev_frame - start_frame + 1,
                     )
@@ -532,28 +544,46 @@ async def process_segment(
         logger.warning(f"No source data for frame {segment.source_frame}, skipping segment")
         return
 
-    # Build points_by_obj dict for SAM3
-    points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    def build_points_by_obj(
+        frame_data: dict[str, Any],
+        label_id_to_obj_id: dict[uuid.UUID, int],
+    ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+        frame_points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        for label_id, points in frame_data["points_by_label"].items():
+            if not points:
+                continue
+            obj_id = label_id_to_obj_id.setdefault(label_id, hash(str(label_id)))
+            pts_array = np.array([[p["x"], p["y"]] for p in points], dtype=np.float32)
+            labels_array = np.array([1 if p["include"] else 0 for p in points], dtype=np.int32)
+            frame_points_by_obj[obj_id] = (pts_array, labels_array)
+        return frame_points_by_obj
+
     label_id_to_obj_id: dict[uuid.UUID, int] = {}
+    points_by_obj = build_points_by_obj(source_data, label_id_to_obj_id)
+    additional_points_by_frame: dict[int, dict[int, tuple[np.ndarray, np.ndarray]]] = {}
 
-    for label_id, points in source_data["points_by_label"].items():
-        if not points:
-            continue
-
-        obj_id = hash(str(label_id))
-        label_id_to_obj_id[label_id] = obj_id
-
-        pts_array = np.array([[p["x"], p["y"]] for p in points], dtype=np.float32)
-        labels_array = np.array([1 if p["include"] else 0 for p in points], dtype=np.int32)
-        points_by_obj[obj_id] = (pts_array, labels_array)
+    if segment.anchor_frame is not None:
+        anchor_data = source_data_by_frame.get(segment.anchor_frame)
+        if anchor_data:
+            anchor_points = build_points_by_obj(anchor_data, label_id_to_obj_id)
+            if anchor_points:
+                additional_points_by_frame[segment.anchor_frame] = anchor_points
+        else:
+            logger.warning(
+                f"No source data for anchor frame {segment.anchor_frame}, continuing without anchor"
+            )
 
     if not points_by_obj:
         logger.warning(f"No points for segment from frame {segment.source_frame}, skipping")
         return
 
     # Determine propagation range
+    target_end_frame = segment.end_frame
+    if segment.anchor_frame is not None and segment.anchor_frame > target_end_frame:
+        target_end_frame = segment.anchor_frame
+
     if segment.direction == "forward":
-        propagate_length = segment.end_frame - segment.source_frame + 1
+        propagate_length = target_end_frame - segment.source_frame + 1
     else:
         propagate_length = segment.source_frame - segment.start_frame + 1
 
@@ -588,13 +618,22 @@ async def process_segment(
         segment.source_frame,
         points_by_obj,
         propagate_length,
+        additional_points_by_frame if additional_points_by_frame else None,
         progress_callback,
     )
 
     # Save propagated masks to database
+    skip_frames = {segment.source_frame}
+    if segment.anchor_frame is not None:
+        skip_frames.add(segment.anchor_frame)
+    filtered_segments = {
+        frame_idx: obj_masks
+        for frame_idx, obj_masks in video_segments.items()
+        if frame_idx not in skip_frames
+    }
     async for db in db_factory():
         await save_segment_masks(
-            video_segments,
+            filtered_segments,
             label_id_to_obj_id,
             segment.source_frame,
             project_id,
