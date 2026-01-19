@@ -109,6 +109,19 @@ async def export_yolo(
             if width == 0 or height == 0:
                 continue
 
+            infer_width = width
+            infer_height = height
+            if image.output_path and image.inference_path:
+                infer_path = Path(settings.PROJECTS_ROOT_DIR) / image.inference_path
+                if infer_path.exists():
+                    infer_img = cv2.imread(str(infer_path))
+                    if infer_img is None:
+                        logger.warning("Failed to read inference image: %s", infer_path)
+                    else:
+                        infer_height, infer_width = infer_img.shape[:2]
+            scale_x = width / infer_width if infer_width else 1.0
+            scale_y = height / infer_height if infer_height else 1.0
+
             out_image_path = images_dir / image_path.name
             shutil.copyfile(image_path, out_image_path)
 
@@ -120,8 +133,8 @@ async def export_yolo(
                 contour = mask.contour_polygon or []
                 if not contour:
                     continue
-                xs = [pt[0] for pt in contour]
-                ys = [pt[1] for pt in contour]
+                xs = [pt[0] * scale_x for pt in contour]
+                ys = [pt[1] * scale_y for pt in contour]
                 xmin, xmax = max(0.0, min(xs)), min(float(width), max(xs))
                 ymin, ymax = max(0.0, min(ys)), min(float(height), max(ys))
                 if xmax <= xmin or ymax <= ymin:
