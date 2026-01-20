@@ -49,7 +49,7 @@ async def list_project_label_settings(
             name=label.name,
             color_hex=label.color_hex,
             thumbnail_path=label.thumbnail_path,
-            enabled=enabled_by_label.get(label.id, True),
+            enabled=enabled_by_label.get(label.id, False),
         )
         for label in labels
     ]
