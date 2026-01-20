@@ -273,7 +273,10 @@ async function fetchLabelSettings(): Promise<void> {
   labelSettingsLoading.value = true;
   try {
     const { data } = await api.get<LabelSetting[]>(`/projects/${projectId}/label_settings`);
-    labelSettings.value = data || [];
+    labelSettings.value = (data || []).map((label) => ({
+      ...label,
+      enabled: false,
+    }));
   } catch (error) {
     console.error('Failed to load label settings:', error);
     labelSettings.value = [];
