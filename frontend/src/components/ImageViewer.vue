@@ -79,10 +79,10 @@ interface Point {
   labelId: string;
 }
 
-// Mask contour stored per label
+// Mask contour stored per label — supports both legacy (flat) and new (dict) formats
 interface MaskContour {
   labelId: string;
-  contourPolygon: number[][];
+  contourPolygon: any;
   area: number;
 }
 
@@ -128,6 +128,10 @@ const wsConnected = ref(false);
 
 // Track the latest SAM request ID per label to ignore out-of-order responses
 const latestRequestByLabel = ref<Map<string, string>>(new Map());
+
+// Debounce timers per label: delays save + SAM inference by 1s after last click
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const DEBOUNCE_MS = 1000;
 
 // Cleanup references
 let resizeObserver: ResizeObserver | null = null;
@@ -452,14 +456,22 @@ function handleClick(e: MouseEvent): void {
   
   console.log('Added point:', point, 'Total points for label:', pointsByLabel.value.get(props.selectedLabelId)?.length);
   
-  // Render the point visually
+  // Render the point visually (immediate feedback)
   renderPoint(point);
   
-  // Save points for this label to backend
-  savePointsForLabel(props.selectedLabelId);
+  // Debounce the backend save + SAM inference to batch rapid clicks
+  debounceSendForLabel(props.selectedLabelId);
+}
+
+function debounceSendForLabel(labelId: string): void {
+  const existing = debounceTimers.get(labelId);
+  if (existing) clearTimeout(existing);
   
-  // Request SAM inference via WebSocket for quick preview
-  requestSAMInference(props.selectedLabelId);
+  debounceTimers.set(labelId, setTimeout(() => {
+    debounceTimers.delete(labelId);
+    savePointsForLabel(labelId);
+    requestSAMInference(labelId);
+  }, DEBOUNCE_MS));
 }
 
 function renderPoint(point: Point): void {
@@ -653,66 +665,82 @@ function requestSAMInference(labelId: string): void {
 }
 
 function renderMaskContour(mask: MaskContour): void {
-  if (!fabricCanvas || !fabricImg || !mask.contourPolygon || mask.contourPolygon.length === 0) {
+  if (!fabricCanvas || !fabricImg || !mask.contourPolygon) {
     return;
   }
   
-  // Remove ALL existing mask visuals for this label - scan canvas objects directly
-  // This is more reliable than relying on the Map which might have stale references
+  // Remove ALL existing mask visuals for this label
   const objectsToRemove: fabric.Object[] = [];
   fabricCanvas.getObjects().forEach((obj: any) => {
     if (obj.isMaskOverlay && obj.maskLabelId === mask.labelId) {
       objectsToRemove.push(obj);
     }
   });
-  
   for (const obj of objectsToRemove) {
     fabricCanvas.remove(obj);
   }
-  
-  // Also clear from our tracking maps
   maskVisuals.value.delete(mask.labelId);
-  
-  // Force a render to ensure the old mask is visually cleared before drawing new one
   fabricCanvas.renderAll();
   
   const width = imageWidth.value;
   const height = imageHeight.value;
-  
   if (width === 0 || height === 0) return;
-  if (mask.contourPolygon.length < 3) return;
   
-  // Create a canvas to render the mask as a filled polygon bitmap
+  // Parse contour data — support both legacy (flat list) and new (dict) formats
+  let contours: number[][][];
+  let hierarchyList: number[][] | null = null;
+  
+  if (mask.contourPolygon && typeof mask.contourPolygon === 'object' && 'contours' in mask.contourPolygon) {
+    contours = mask.contourPolygon.contours;
+    hierarchyList = mask.contourPolygon.hierarchy ?? null;
+  } else if (Array.isArray(mask.contourPolygon) && mask.contourPolygon.length >= 3) {
+    contours = [mask.contourPolygon];
+  } else {
+    return;
+  }
+  
+  if (contours.length === 0) return;
+  
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = width;
   tempCanvas.height = height;
   const ctx = tempCanvas.getContext('2d');
   if (!ctx) return;
   
-  // Parse the label color
   const color = getLabelColor(mask.labelId);
   const rgb = hexToRgb(color);
   
-  // Draw the filled polygon
+  // Draw all contours as sub-paths with evenodd fill to preserve holes
   ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.4)`;
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   
   ctx.beginPath();
-  const firstPoint = mask.contourPolygon[0];
-  ctx.moveTo(firstPoint[0], firstPoint[1]);
+  for (const contour of contours) {
+    if (contour.length < 3) continue;
+    ctx.moveTo(contour[0][0], contour[0][1]);
+    for (let i = 1; i < contour.length; i++) {
+      ctx.lineTo(contour[i][0], contour[i][1]);
+    }
+    ctx.closePath();
+  }
+  ctx.fill('evenodd');
   
-  for (let i = 1; i < mask.contourPolygon.length; i++) {
-    const point = mask.contourPolygon[i];
-    ctx.lineTo(point[0], point[1]);
+  // Stroke only outer contours (parent == -1 in hierarchy)
+  for (let ci = 0; ci < contours.length; ci++) {
+    const contour = contours[ci];
+    if (contour.length < 3) continue;
+    const isOuter = !hierarchyList || hierarchyList[ci]?.[3] === -1;
+    if (!isOuter) continue;
+    ctx.beginPath();
+    ctx.moveTo(contour[0][0], contour[0][1]);
+    for (let i = 1; i < contour.length; i++) {
+      ctx.lineTo(contour[i][0], contour[i][1]);
+    }
+    ctx.closePath();
+    ctx.stroke();
   }
   
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  
-  // Create fabric image from the mask canvas (contour version)
-  // Add custom properties to identify this as a mask overlay for easy removal later
   const maskImage = new fabric.Image(tempCanvas, {
     left: fabricImg.left,
     top: fabricImg.top,
@@ -722,14 +750,12 @@ function renderMaskContour(mask: MaskContour): void {
     evented: false,
   }) as fabric.Image & { isMaskOverlay: boolean; maskLabelId: string };
   
-  // Mark this object as a mask overlay so we can find and remove it later
   maskImage.isMaskOverlay = true;
   maskImage.maskLabelId = mask.labelId;
   
   fabricCanvas.add(maskImage);
-  fabricCanvas.moveTo(maskImage, 1); // Behind points but in front of image
+  fabricCanvas.moveTo(maskImage, 1);
   
-  // Bring all points to front
   for (const visual of pointVisuals.value.values()) {
     fabricCanvas.bringToFront(visual.circle);
     fabricCanvas.bringToFront(visual.icon);
@@ -737,8 +763,6 @@ function renderMaskContour(mask: MaskContour): void {
   
   maskVisuals.value.set(mask.labelId, maskImage);
   fabricCanvas.renderAll();
-  
-  console.log('Rendered mask contour for label:', mask.labelId);
 }
 
 async function loadAllExistingData(): Promise<void> {
@@ -940,6 +964,15 @@ function setupResizeObserver(): void {
   });
   
   resizeObserver.observe(containerRef.value);
+}
+
+function flushDebounceTimers(): void {
+  for (const [labelId, timer] of debounceTimers) {
+    clearTimeout(timer);
+    savePointsForLabel(labelId);
+    requestSAMInference(labelId);
+  }
+  debounceTimers.clear();
 }
 
 function connectWebSocket(): void {
@@ -1340,11 +1373,12 @@ watch(() => props.imageUrl, (newUrl) => {
 // Watch for frame changes - reload data
 watch(() => props.frameNumber, async () => {
   if (fabricCanvas && fabricImg && props.projectId) {
-    // Clear visuals before loading new data to prevent duplicates
+    // Flush any pending debounced sends before switching frames
+    flushDebounceTimers();
     clearAllVisuals();
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
-    latestRequestByLabel.value.clear(); // Clear pending request tracking
+    latestRequestByLabel.value.clear();
     await loadAllExistingData();
   }
 });
@@ -1401,6 +1435,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyPress);
+  
+  // Flush pending debounced sends so no clicks are lost
+  flushDebounceTimers();
   
   // Clean up container event handlers
   cleanupEventHandlers();

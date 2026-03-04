@@ -1,4 +1,4 @@
-"""Export images and labels in YOLO format as a ZIP archive."""
+"""Export images and semantic segmentation masks as a ZIP archive."""
 
 import shutil
 import tempfile
@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 import cv2
+import numpy as np
 from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from app.core.config import settings
-from app.core.contour_utils import contour_bounding_box
+from app.core.contour_utils import draw_contours_on_mask
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.trim_utils import get_trim_frame_bounds
@@ -35,13 +36,17 @@ def _cleanup_export(path: Path) -> None:
         logger.warning("Failed to cleanup export directory: %s", path)
 
 
-@router.get("/projects/{project_id}/export/yolo")
-async def export_yolo(
+@router.get("/projects/{project_id}/export/segmask")
+async def export_segmask(
     project_id: UUID,
     skip_n: int = Query(1, ge=1, description="Skip every Nth frame in export"),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
-    """Export project images and YOLO labels as a ZIP."""
+    """Export project images (JPG) and semantic segmentation masks (PNG) as a ZIP.
+
+    Each label gets a pixel value equal to its 1-based index (sorted by name).
+    Higher-indexed labels are painted last and take priority in overlapping regions.
+    """
     try:
         project_result = await db.execute(select(Project).where(Project.id == project_id))
         project = project_result.scalar_one_or_none()
@@ -69,7 +74,7 @@ async def export_yolo(
 
         labels_result = await db.execute(select(Label).order_by(Label.name))
         labels = list(labels_result.scalars().all())
-        label_index = {label.id: idx for idx, label in enumerate(labels)}
+        label_index = {label.id: idx + 1 for idx, label in enumerate(labels)}
 
         image_ids = [img.id for img in images]
         masks_result = await db.execute(
@@ -84,24 +89,9 @@ async def export_yolo(
             if not existing or mask.area > existing.area:
                 by_label[mask.label_id] = mask
 
-        export_dir = Path(tempfile.mkdtemp(prefix="segmentflow_export_"))
-        images_dir = export_dir / "images"
-        labels_dir = export_dir / "labels"
-        images_dir.mkdir(parents=True, exist_ok=True)
-        labels_dir.mkdir(parents=True, exist_ok=True)
-
-        data_path = export_dir / "data.yml"
-        data_lines = [
-            "names:",
-            *[f"- {label.name}" for label in labels],
-            "colors:",
-            *[f"- \"{label.color_hex}\"" for label in labels],
-            f"nc: {len(labels)}",
-            "test: ../test/images",
-            "train: ../train/images",
-            "val: ../val/images",
-        ]
-        data_path.write_text("\n".join(data_lines), encoding="utf-8")
+        export_dir = Path(tempfile.mkdtemp(prefix="segmentflow_segmask_"))
+        out_dir = export_dir / "segmask"
+        out_dir.mkdir(parents=True, exist_ok=True)
 
         for idx, image in enumerate(images):
             if skip_n > 1 and idx % skip_n != 0:
@@ -138,43 +128,32 @@ async def export_yolo(
             scale_x = width / infer_width if infer_width else 1.0
             scale_y = height / infer_height if infer_height else 1.0
 
-            out_image_path = images_dir / image_path.name
-            shutil.copyfile(image_path, out_image_path)
+            stem = image_path.stem
+            rgb_path = out_dir / f"{stem}.jpg"
+            cv2.imwrite(str(rgb_path), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-            label_lines: list[str] = []
+            seg_mask = np.zeros((height, width), dtype=np.uint8)
             by_label = masks_by_image.get(image.id, {})
-            for label_id, mask in by_label.items():
-                if label_id not in label_index:
+
+            sorted_labels = sorted(by_label.items(), key=lambda item: label_index.get(item[0], 0))
+            for label_id, mask in sorted_labels:
+                pixel_val = label_index.get(label_id)
+                if pixel_val is None:
                     continue
-                bbox = contour_bounding_box(
-                    mask.contour_polygon, scale_x=scale_x, scale_y=scale_y,
-                )
-                if bbox is None:
-                    continue
-                xmin, ymin, xmax, ymax = bbox
-                xmin = max(0.0, xmin)
-                ymin = max(0.0, ymin)
-                xmax = min(float(width), xmax)
-                ymax = min(float(height), ymax)
-                if xmax <= xmin or ymax <= ymin:
-                    continue
-                x_center = (xmin + xmax) / 2.0 / width
-                y_center = (ymin + ymax) / 2.0 / height
-                box_w = (xmax - xmin) / width
-                box_h = (ymax - ymin) / height
-                class_id = label_index[label_id]
-                label_lines.append(
-                    f"{class_id} {x_center:.6f} {y_center:.6f} {box_w:.6f} {box_h:.6f}"
+                draw_contours_on_mask(
+                    seg_mask,
+                    mask.contour_polygon,
+                    value=pixel_val,
+                    scale_x=scale_x,
+                    scale_y=scale_y,
                 )
 
-            label_path = labels_dir / f"{image_path.stem}.txt"
-            label_path.write_text("\n".join(label_lines), encoding="utf-8")
+            mask_path = out_dir / f"{stem}_mask.png"
+            cv2.imwrite(str(mask_path), seg_mask)
 
-        zip_path = export_dir / f"{project.name}_export.zip"
+        zip_path = export_dir / f"{project.name}_segmask.zip"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for path in export_dir.rglob("*"):
-                if path == zip_path:
-                    continue
+            for path in out_dir.rglob("*"):
                 zipf.write(path, path.relative_to(export_dir))
 
         return FileResponse(
@@ -186,8 +165,8 @@ async def export_yolo(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to export YOLO ZIP: %s", e, exc_info=True)
+        logger.error("Failed to export segmentation mask ZIP: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to export YOLO ZIP",
+            detail="Failed to export segmentation mask ZIP",
         ) from e

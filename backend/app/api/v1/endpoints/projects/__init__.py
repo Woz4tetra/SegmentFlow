@@ -3,6 +3,7 @@ from .clear_frame_labels import clear_frame_labels
 from .complete_video_upload import complete_video_upload
 from .create_project import create_project
 from .delete_project import delete_project
+from .export_segmask import export_segmask
 from .export_yolo import export_yolo
 from .get_conversion_progress import get_conversion_progress
 from .get_frame_image import get_frame_image
@@ -33,6 +34,7 @@ __all__ = [
     "complete_video_upload",
     "create_project",
     "delete_project",
+    "export_segmask",
     "export_yolo",
     "get_conversion_progress",
     "get_frame_image",

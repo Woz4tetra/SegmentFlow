@@ -150,53 +150,58 @@ async def _run_sam_inference(
 def _process_mask_to_contour(
     mask: np.ndarray,
     frame_number: int,
-) -> tuple[list[list[int]], float] | None:
-    """Process a raw mask array into a contour polygon and area.
+) -> tuple[dict, float] | None:
+    """Process a raw mask array into contours with hierarchy, preserving holes.
 
     Args:
         mask: Raw numpy mask array from SAM
         frame_number: Frame number (for logging)
 
     Returns:
-        Tuple of (contour_pixels, area) if successful, None otherwise
+        Tuple of (contour_data_dict, area) if successful, None otherwise.
+        contour_data_dict has keys "contours" and "hierarchy".
     """
-    # Ensure mask is a 2D array
     if mask.ndim > 2:
         mask = np.squeeze(mask)
     if mask.ndim != 2:
         logger.warning(f"Unexpected mask shape {mask.shape}")
         return None
 
-    # Convert mask to uint8 and ensure it's contiguous (required by OpenCV)
     mask_uint8 = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask.astype(np.uint8)
     mask_uint8 = np.ascontiguousarray(mask_uint8)
 
-    # Find contours using OpenCV with CHAIN_APPROX_SIMPLE to reduce point count
-    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(
+        mask_uint8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE,
+    )
 
-    if not contours:
+    if not contours or hierarchy is None:
         logger.warning(f"SAM mask has no contours for frame {frame_number}")
         return None
 
-    # Take only the largest contour (avoid multiple disconnected regions)
-    largest_contour = max(contours, key=cv2.contourArea)
+    contours_list = [c.reshape(-1, 2).tolist() for c in contours]
+    hierarchy_list = hierarchy[0].tolist()
 
-    # Reshape contour from (n, 1, 2) to list of [x, y] pairs
-    contour_pixels = largest_contour.reshape(-1, 2).tolist()
+    area = 0.0
+    for i, c in enumerate(contours):
+        ca = cv2.contourArea(c)
+        if hierarchy_list[i][3] == -1:
+            area += ca
+        else:
+            area -= ca
+    area = abs(area)
 
-    if len(contour_pixels) < 3:
-        logger.warning(f"SAM mask contour too small for frame {frame_number}")
-        return None
-
-    area = float(cv2.contourArea(largest_contour))
-    return contour_pixels, area
+    contour_data = {
+        "contours": contours_list,
+        "hierarchy": hierarchy_list,
+    }
+    return contour_data, area
 
 
 async def _save_or_update_mask(
     db: AsyncSession,
     image: Image,
     label_id: UUID,
-    contour_pixels: list[list[int]],
+    contour_data: dict | list,
     area: float,
 ) -> None:
     """Save or update a mask in the database.
@@ -205,7 +210,7 @@ async def _save_or_update_mask(
         db: Database session
         image: Image model instance
         label_id: Label UUID
-        contour_pixels: List of [x, y] coordinate pairs
+        contour_data: Contour polygon data (dict with contours+hierarchy, or legacy list)
         area: Mask area in pixels
     """
     existing_mask_result = await db.execute(
@@ -217,14 +222,14 @@ async def _save_or_update_mask(
     existing_mask = existing_mask_result.scalar_one_or_none()
 
     if existing_mask:
-        existing_mask.contour_polygon = contour_pixels
+        existing_mask.contour_polygon = contour_data
         existing_mask.area = area
         db.add(existing_mask)
     else:
         db_mask = Mask(
             image_id=image.id,
             label_id=label_id,
-            contour_polygon=contour_pixels,
+            contour_polygon=contour_data,
             area=area,
         )
         db.add(db_mask)
@@ -302,14 +307,12 @@ async def _run_sam_inference_and_save_mask(
         if mask is None:
             return False
 
-        # Process mask to contour
         contour_result = _process_mask_to_contour(mask, frame_number)
         if contour_result is None:
             return False
-        contour_pixels, area = contour_result
+        contour_data, area = contour_result
 
-        # Save mask to database
-        await _save_or_update_mask(db, image, label_id, contour_pixels, area)
+        await _save_or_update_mask(db, image, label_id, contour_data, area)
 
         logger.info(
             f"Successfully saved SAM mask for project {project_id}, "

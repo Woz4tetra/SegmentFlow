@@ -13,7 +13,7 @@
       <p class="eyebrow">Stage: Export</p>
       <h1>{{ project?.name ?? 'Loading...' }}</h1>
       <p class="lede">
-        Download output JPEGs and YOLO label files. Labels use the largest contour for each class.
+        Download output images and labels. Choose YOLO bounding-box format or semantic segmentation masks.
       </p>
     </div>
   </section>
@@ -22,13 +22,28 @@
     <div class="export-card">
       <div v-if="loading" class="loading">Loading project…</div>
       <div v-else class="export-body">
-        <div class="export-info">
-          <h3>YOLO Export</h3>
-          <p>Includes images and labels in a ZIP with a classes.txt file.</p>
+        <div class="export-option">
+          <div class="export-info">
+            <h3>YOLO Export</h3>
+            <p>Bounding-box labels with images in a ZIP and a classes.txt file.</p>
+          </div>
+          <button class="primary large" type="button" :disabled="downloadingYolo" @click="downloadYolo">
+            {{ downloadingYolo ? 'Preparing...' : 'Download YOLO ZIP' }}
+          </button>
         </div>
-        <button class="primary large" type="button" :disabled="downloading" @click="downloadExport">
-          {{ downloading ? 'Preparing...' : 'Download Export ZIP' }}
-        </button>
+
+        <hr class="divider" />
+
+        <div class="export-option">
+          <div class="export-info">
+            <h3>Segmentation Mask Export</h3>
+            <p>RGB images (JPG) and pixel-valued segmentation masks (PNG) in a ZIP. Label&nbsp;#1&nbsp;=&nbsp;pixel&nbsp;1, etc.</p>
+          </div>
+          <button class="primary large segmask" type="button" :disabled="downloadingMask" @click="downloadMask">
+            {{ downloadingMask ? 'Preparing...' : 'Download Mask ZIP' }}
+          </button>
+        </div>
+
         <p v-if="error" class="error">{{ error }}</p>
       </div>
     </div>
@@ -63,7 +78,8 @@ const api = axios.create({
 });
 
 const loading = ref(true);
-const downloading = ref(false);
+const downloadingYolo = ref(false);
+const downloadingMask = ref(false);
 const error = ref('');
 const project = ref<Project | null>(null);
 const userSettings = useUserSettingsStore();
@@ -86,25 +102,42 @@ async function markVisited(): Promise<void> {
   }
 }
 
-async function downloadExport(): Promise<void> {
-  if (downloading.value) return;
-  downloading.value = true;
+function triggerDownload(url: string): void {
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', '');
+  link.setAttribute('rel', 'noopener');
+  link.setAttribute('target', '_blank');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function downloadYolo(): Promise<void> {
+  if (downloadingYolo.value) return;
+  downloadingYolo.value = true;
   error.value = '';
   try {
     const skipParam = userSettings.export_skip_n > 1 ? `?skip_n=${userSettings.export_skip_n}` : '';
-    const url = buildApiUrl(`/projects/${projectId}/export/yolo${skipParam}`);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', '');
-    link.setAttribute('rel', 'noopener');
-    link.setAttribute('target', '_blank');
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    triggerDownload(buildApiUrl(`/projects/${projectId}/export/yolo${skipParam}`));
   } catch (err) {
-    error.value = 'Failed to download export. Please try again.';
+    error.value = 'Failed to download YOLO export. Please try again.';
   } finally {
-    downloading.value = false;
+    downloadingYolo.value = false;
+  }
+}
+
+async function downloadMask(): Promise<void> {
+  if (downloadingMask.value) return;
+  downloadingMask.value = true;
+  error.value = '';
+  try {
+    const skipParam = userSettings.export_skip_n > 1 ? `?skip_n=${userSettings.export_skip_n}` : '';
+    triggerDownload(buildApiUrl(`/projects/${projectId}/export/segmask${skipParam}`));
+  } catch (err) {
+    error.value = 'Failed to download mask export. Please try again.';
+  } finally {
+    downloadingMask.value = false;
   }
 }
 
@@ -181,6 +214,18 @@ onMounted(async () => {
   gap: 1rem;
 }
 
+.export-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--border, #dfe3ec);
+  margin: 0.5rem 0;
+}
+
 .export-info h3 {
   margin: 0 0 0.3rem;
   font-size: 1rem;
@@ -189,6 +234,14 @@ onMounted(async () => {
 .export-info p {
   margin: 0;
   color: var(--muted, #6b7280);
+}
+
+.primary.large.segmask {
+  background: linear-gradient(135deg, #059669, #0d9488);
+}
+
+.primary.large.segmask:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(5, 150, 105, 0.35);
 }
 
 .primary.large {

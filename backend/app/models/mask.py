@@ -28,8 +28,10 @@ class Mask(BaseModel):
         nullable=False,
         index=True,
     )
-    # contour_polygon is a list of [x, y] coordinate pairs stored as JSON
-    contour_polygon: Mapped[list[list[Any]]] = mapped_column(JSON, nullable=False)
+    # contour_polygon stores mask contours as JSON. New format is a dict:
+    # {"contours": [[[x,y],...], ...], "hierarchy": [[next,prev,child,parent], ...]}
+    # Legacy format is a flat list of [x, y] pairs for a single contour.
+    contour_polygon: Mapped[Any] = mapped_column(JSON, nullable=False)
     area: Mapped[float] = mapped_column(Float, nullable=False)
 
     image: Mapped["Image"] = relationship("Image", back_populates="masks")

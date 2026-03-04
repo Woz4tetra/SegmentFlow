@@ -1,6 +1,7 @@
 """Pydantic request/response schemas for API validation."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -552,11 +553,11 @@ class MaskCreate(BaseModel):
     """Schema for creating a mask.
 
     Attributes:
-        contour_polygon: Contour polygon as list of [x, y] coordinates
+        contour_polygon: Mask contour data (dict with contours+hierarchy or legacy flat list)
         area: Area of the mask in pixels
     """
 
-    contour_polygon: list[list[float]] = Field(..., description="Contour polygon [[x, y], ...]")
+    contour_polygon: Any = Field(..., description="Contour data (dict or legacy list)")
     area: float = Field(..., ge=0, description="Mask area in pixels")
 
 
@@ -566,13 +567,13 @@ class MaskResponse(BaseModel):
     Attributes:
         id: Mask UUID
         label_id: Label UUID this mask belongs to
-        contour_polygon: Contour polygon as list of [x, y] coordinates
+        contour_polygon: Mask contour data (dict with contours+hierarchy or legacy flat list)
         area: Area of the mask in pixels
     """
 
     id: UUID
     label_id: UUID
-    contour_polygon: list[list[float]]
+    contour_polygon: Any
     area: float
 
     model_config = {"from_attributes": True}
