@@ -9,6 +9,7 @@ from app.models.label import Label
 from app.models.labeled_point import LabeledPoint
 from app.models.mask import Mask
 from app.models.project import Project, ProjectStage
+from app.models.project_label_setting import ProjectLabelSetting
 from app.models.stats import Stats
 from app.models.user_settings import Theme, UserSettings
 
@@ -19,6 +20,7 @@ __all__ = [
     "LabeledPoint",
     "Mask",
     "Project",
+    "ProjectLabelSetting",
     "ProjectStage",
     "Stats",
     "Theme",

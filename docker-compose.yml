@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U segmentflow"]
       interval: 10s
@@ -26,7 +26,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -45,21 +45,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: segmentflow
-      DB_USER: segmentflow
-      DB_PASSWORD_FILE: /run/secrets/postgres_password
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: development
-      DEBUG: "True"
-      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "http://frontend:5173"]'
-      # Set Hugging Face home to use mounted cache
-      HF_HOME: /root/.cache/huggingface
-      # HuggingFace token for accessing gated models like SAM3
-      # Set this in your .env file: HF_TOKEN=your_token_here
-      HF_TOKEN: ${HF_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
@@ -67,7 +52,7 @@ services:
       # Cache SAM3 model from Hugging Face (mount local cache)
       - ./backend/data/models:/root/.cache/huggingface/hub
       # Cache PyTorch models
-      - torch_cache:/root/.cache/torch
+      - ./data/torch_cache:/root/.cache/torch
     networks:
       - segmentflow-network
     secrets:
@@ -85,20 +70,15 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
     container_name: segmentflow-frontend
     depends_on:
       - backend
-    environment:
-      VITE_API_URL: http://backend:8000/api/v1
     ports:
       - "5173:5173"
     networks:
       - segmentflow-network
-
-volumes:
-  postgres_data:
-  redis_data:
-  torch_cache:
 
 networks:
   segmentflow-network:

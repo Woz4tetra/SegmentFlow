@@ -79,6 +79,25 @@
         </button>
       </div>
     </div>
+
+    <div class="settings-card">
+      <h2 class="section-title">Export</h2>
+      <p class="section-description">Choose the frame sampling rate for exports.</p>
+      <div class="settings-row">
+        <label class="field field--inline">
+          <span>Skip every Nth frame</span>
+        </label>
+        <input
+          class="number-input"
+          type="number"
+          min="1"
+          step="1"
+          :value="export_skip_n"
+          @input="handleExportSkipInput"
+        />
+      </div>
+      <p class="muted">Set to 1 to export every frame. Set to 3 to export frames 0, 3, 6, ...</p>
+    </div>
   </section>
 </template>
 
@@ -87,8 +106,8 @@ import { storeToRefs } from 'pinia';
 import { useUserSettingsStore, type ColumnVisibility } from '../stores/userSettings';
 
 const userSettings = useUserSettingsStore();
-const { theme, visible_columns } = storeToRefs(userSettings);
-const { toggleTheme, toggleColumnVisibility, resetToDefaults } = userSettings;
+const { theme, visible_columns, export_skip_n } = storeToRefs(userSettings);
+const { toggleTheme, toggleColumnVisibility, resetToDefaults, setExportSkipN } = userSettings;
 
 const handleColumnToggle = (column: keyof ColumnVisibility) => {
   toggleColumnVisibility(column);
@@ -98,6 +117,11 @@ const resetSettings = () => {
   if (confirm('Reset all settings to defaults?')) {
     resetToDefaults();
   }
+};
+
+const handleExportSkipInput = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  setExportSkipN(Number(target.value));
 };
 </script>
 
@@ -212,6 +236,16 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   height: 18px;
   cursor: pointer;
   accent-color: #2563eb;
+}
+
+.number-input {
+  width: 110px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border, #dfe3ec);
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  font-weight: 600;
 }
 
 .muted { 

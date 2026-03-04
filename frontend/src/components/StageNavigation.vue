@@ -18,7 +18,7 @@
           <svg v-if="isStageCompleted(stage.id)" class="stage-icon" viewBox="0 0 24 24" width="16" height="16">
             <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <span v-else class="stage-number">{{ index + 1 }}</span>
+          <span v-else class="stage-number">{{ index }}</span>
         </div>
         <div class="stage-label">{{ stage.name }}</div>
       </div>
@@ -58,8 +58,8 @@ const stages: Stage[] = [
   { id: 'trim', name: 'Trim', route: 'Trim' },
   { id: 'manual_labeling', name: 'Manual Label', route: 'ManualLabeling' },
   { id: 'propagation', name: 'Propagate', route: 'Propagation' },
-  { id: 'validation', name: 'Validation', route: 'Upload' },
-  { id: 'export', name: 'Export', route: 'Upload' },
+  { id: 'validation', name: 'Validation', route: 'Validation' },
+  { id: 'export', name: 'Export', route: 'Export' },
 ];
 
 const currentStage = computed(() => props.project.stage);

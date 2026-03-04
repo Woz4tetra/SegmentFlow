@@ -50,6 +50,7 @@ import { useProjectsStore } from '../stores/projects';
 import FileUpload from '../components/FileUpload.vue';
 import StageNavigation from '../components/StageNavigation.vue';
 import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 
 interface Project {
   id: string;
@@ -77,7 +78,7 @@ const conversionProgress = ref({ saved: 0, total: 0 });
 let conversionPollInterval: number | null = null;
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 30000,
 });
 
@@ -112,11 +113,18 @@ async function markStageVisited(): Promise<void> {
 async function computeFileHash(file: File): Promise<string> {
   console.log('Computing file hash...');
   const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  console.log('File hash (SHA-256):', hashHex);
-  return hashHex;
+
+  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    console.log('File hash (SHA-256):', hashHex);
+    return hashHex;
+  }
+
+  // SubtleCrypto is unavailable in non-secure contexts; skip hash verification.
+  console.warn('SubtleCrypto unavailable; skipping file hash verification.');
+  return '';
 }
 
 // Upload file in chunks to backend

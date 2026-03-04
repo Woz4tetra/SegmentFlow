@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.sam3_state import get_primary_tracker
 from app.core.sam3_tracker import SAM3Tracker
+from app.core.trim_utils import is_frame_in_trim
 from app.models.image import Image
 from app.models.label import Label
 from app.models.labeled_point import LabeledPoint
@@ -282,6 +283,12 @@ async def _run_sam_inference_and_save_mask(
         if result is None:
             return False
         project, image = result
+        if not is_frame_in_trim(project, frame_number):
+            logger.warning(
+                "Skipping SAM inference for frame outside trim range: %s",
+                frame_number,
+            )
+            return False
 
         # Get inference directory
         inference_dir = _get_inference_dir(project)
@@ -348,6 +355,12 @@ async def save_labeled_points(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Project with ID {project_id} not found",
+            )
+
+        if not is_frame_in_trim(project, frame_number):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Frame {frame_number} outside trim range",
             )
 
         # Get image for this frame

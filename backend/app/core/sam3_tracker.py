@@ -620,6 +620,7 @@ class SAM3Tracker:
         source_frame: int,
         points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]],
         propagate_length: int,
+        additional_points_by_frame: dict[int, dict[int, tuple[np.ndarray, np.ndarray]]] | None = None,
         callback: Callable[[int, float], None] | None = None,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, np.ndarray]]:
         """Prepare frames, add points, and propagate masks.
@@ -635,6 +636,7 @@ class SAM3Tracker:
             source_frame: Frame index to start from
             points_by_obj: Dict of {obj_id: (points, labels)} with normalized coords
             propagate_length: Number of frames to propagate
+            additional_points_by_frame: Optional mapping of frame_idx to points_by_obj
             callback: Optional callback(frame_idx, progress) for progress updates
 
         Returns:
@@ -670,6 +672,21 @@ class SAM3Tracker:
                         labels=labels,
                         clear_old=True,
                     )
+
+            if additional_points_by_frame:
+                for frame_idx, frame_points in additional_points_by_frame.items():
+                    local_frame_idx = frame_idx - source_frame
+                    if local_frame_idx < 0 or local_frame_idx >= max_frames:
+                        continue
+                    for obj_id, (points, labels) in frame_points.items():
+                        if len(points) > 0:
+                            self.add_points(
+                                local_frame_idx=local_frame_idx,
+                                obj_id=obj_id,
+                                points=points,
+                                labels=labels,
+                                clear_old=True,
+                            )
 
             # Propagate through frames (ensure correct GPU context)
             video_segments: dict[int, dict[int, np.ndarray]] = {}

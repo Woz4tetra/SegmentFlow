@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { defineStore } from 'pinia';
+import { API_BASE_URL } from '../lib/api';
 
 export type ProjectStage =
   | 'upload'
@@ -28,9 +29,7 @@ interface ProjectListResponse {
 }
 
 const api = axios.create({
-  // Prefer explicit API URL when provided by environment (Docker dev: VITE_API_URL=http://backend:8000/api/v1)
-  // Otherwise use relative path for Vite proxy in local dev.
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 8000,
 });
 
@@ -80,6 +79,23 @@ export const useProjectsStore = defineStore('projects', {
               : 'Failed to create project';
         this.error = message;
         return null;
+      }
+    },
+    async deleteProject(projectId: string): Promise<boolean> {
+      try {
+        await api.delete(`/projects/${projectId}`);
+        this.projects = this.projects.filter((project) => project.id !== projectId);
+        this.total = Math.max(0, this.total - 1);
+        return true;
+      } catch (err) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.detail
+            ? String(err.response.data.detail)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to delete project';
+        this.error = message;
+        return false;
       }
     },
   },
