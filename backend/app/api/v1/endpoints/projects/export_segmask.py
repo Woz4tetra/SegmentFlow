@@ -93,6 +93,10 @@ async def export_segmask(
         out_dir = export_dir / "segmask"
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        classes_path = out_dir / "classes.txt"
+        class_lines = [f"{idx + 1}: {label.name}" for idx, label in enumerate(labels)]
+        classes_path.write_text("\n".join(class_lines), encoding="utf-8")
+
         for idx, image in enumerate(images):
             if skip_n > 1 and idx % skip_n != 0:
                 continue
