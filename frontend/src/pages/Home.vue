@@ -11,6 +11,13 @@
       </div>
     </div>
     <div class="hero__actions">
+      <button
+        :class="['ghost', { 'ghost--active': bulkMode }]"
+        type="button"
+        @click="toggleBulkMode"
+      >
+        {{ bulkMode ? 'Exit Bulk' : 'Bulk Actions' }}
+      </button>
       <button class="ghost" type="button" :disabled="loading" @click="handleRefresh">
         {{ loading ? 'Refreshing...' : 'Refresh' }}
       </button>
@@ -19,6 +26,48 @@
       </button>
     </div>
   </section>
+
+  <!-- Bulk Actions Toolbar -->
+  <div v-if="bulkMode && orderedProjects.length" class="bulk-toolbar">
+    <div class="bulk-toolbar__left">
+      <label class="bulk-select-all" @click.prevent="toggleSelectAll">
+        <input
+          type="checkbox"
+          :checked="allSelected"
+          :indeterminate.prop="selectedCount > 0 && !allSelected"
+        />
+        <span v-if="allSelected">Deselect All</span>
+        <span v-else>Select All</span>
+      </label>
+      <span class="bulk-count">{{ selectedCount }} selected</span>
+    </div>
+    <div class="bulk-toolbar__right">
+      <div class="bulk-dropdown" @click.stop>
+        <button
+          class="bulk-dropdown__trigger"
+          type="button"
+          :disabled="selectedCount === 0 || bulkBusy"
+          @click="bulkDropdownOpen = !bulkDropdownOpen"
+        >
+          {{ bulkBusy ? 'Exporting...' : 'Run Action' }}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div v-if="bulkDropdownOpen" class="bulk-dropdown__menu">
+          <button
+            v-for="action in bulkActions"
+            :key="action.key"
+            class="bulk-dropdown__item"
+            type="button"
+            @click="runBulkAction(action.key)"
+          >
+            {{ action.label }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <section class="content">
     <div v-if="loading" class="grid">
@@ -48,13 +97,13 @@
       <article
         v-for="project in orderedProjects"
         :key="project.id"
-        class="project-card"
+        :class="['project-card', { 'project-card--selected': bulkMode && selectedIds.has(project.id) }]"
         :data-available="isStageAvailable(effectiveStage(project))"
         role="button"
         tabindex="0"
-        :title="isStageAvailable(effectiveStage(project)) ? 'Open editor' : 'Editor coming soon for this stage'"
-        @click="goToStage(project)"
-        @keydown.enter="goToStage(project)"
+        :title="bulkMode ? 'Toggle selection' : isStageAvailable(effectiveStage(project)) ? 'Open editor' : 'Editor coming soon for this stage'"
+        @click="bulkMode ? toggleProjectSelection(project.id) : goToStage(project)"
+        @keydown.enter="bulkMode ? toggleProjectSelection(project.id) : goToStage(project)"
       >
         <div class="thumb" :style="project.video_path ? {} : gradientStyle(project)">
           <img
@@ -64,6 +113,10 @@
             class="thumb__img"
             @error="onThumbnailError"
           />
+          <!-- Bulk selection checkbox -->
+          <div v-if="bulkMode" class="bulk-check" @click.stop="toggleProjectSelection(project.id)">
+            <input type="checkbox" :checked="selectedIds.has(project.id)" tabindex="-1" />
+          </div>
           <div class="thumb__top">
             <div class="thumb__badges">
             <span
@@ -141,7 +194,7 @@ import type { Project, ProjectStage } from '../stores/projects';
 import { useProjectsStore } from '../stores/projects';
 import { useUserSettingsStore } from '../stores/userSettings';
 import { useRouter } from 'vue-router';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, buildApiUrl } from '../lib/api';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
@@ -309,9 +362,89 @@ const confirmDelete = async () => {
   }
 };
 
+// ── Bulk Actions ──
+const bulkMode = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
+const bulkDropdownOpen = ref(false);
+const bulkBusy = ref(false);
+
+const selectedCount = computed(() => selectedIds.value.size);
+const allSelected = computed(() =>
+  orderedProjects.value.length > 0 && selectedIds.value.size === orderedProjects.value.length,
+);
+
+function toggleBulkMode(): void {
+  bulkMode.value = !bulkMode.value;
+  if (!bulkMode.value) {
+    selectedIds.value = new Set();
+    bulkDropdownOpen.value = false;
+  }
+}
+
+function toggleProjectSelection(id: string): void {
+  const next = new Set(selectedIds.value);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  selectedIds.value = next;
+}
+
+function selectAll(): void {
+  selectedIds.value = new Set(orderedProjects.value.map(p => p.id));
+}
+
+function deselectAll(): void {
+  selectedIds.value = new Set();
+}
+
+function toggleSelectAll(): void {
+  if (allSelected.value) deselectAll(); else selectAll();
+}
+
+type BulkAction = 'export_yolo' | 'export_segmask';
+
+const bulkActions: { key: BulkAction; label: string }[] = [
+  { key: 'export_yolo', label: 'Export YOLO' },
+  { key: 'export_segmask', label: 'Export Segmentation Masks' },
+];
+
+function triggerDownload(url: string): void {
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', '');
+  link.setAttribute('rel', 'noopener');
+  link.setAttribute('target', '_blank');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function runBulkAction(action: BulkAction): Promise<void> {
+  bulkDropdownOpen.value = false;
+  if (selectedIds.value.size === 0 || bulkBusy.value) return;
+  bulkBusy.value = true;
+
+  const ids = [...selectedIds.value];
+  const skipParam = userSettingsStore.export_skip_n > 1
+    ? `?skip_n=${userSettingsStore.export_skip_n}`
+    : '';
+
+  const pathSegment = action === 'export_yolo' ? 'yolo' : 'segmask';
+
+  for (let i = 0; i < ids.length; i++) {
+    triggerDownload(buildApiUrl(`/projects/${ids[i]}/export/${pathSegment}${skipParam}`));
+    if (i < ids.length - 1) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  bulkBusy.value = false;
+}
+
 const handleGlobalClick = () => {
   if (openMenuId.value) {
     closeMenu();
+  }
+  if (bulkDropdownOpen.value) {
+    bulkDropdownOpen.value = false;
   }
 };
 
@@ -802,6 +935,170 @@ h1 {
   }
 }
 
+/* ── Bulk Mode ── */
+
+.ghost--active {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.25);
+}
+
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1.2rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+  margin-bottom: 1rem;
+}
+
+.bulk-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.bulk-select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text, #0f172a);
+  user-select: none;
+}
+
+.bulk-select-all input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.bulk-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+
+.bulk-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bulk-dropdown {
+  position: relative;
+}
+
+.bulk-dropdown__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+
+.bulk-dropdown__trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.bulk-dropdown__trigger:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
+}
+
+.bulk-dropdown__trigger svg {
+  flex-shrink: 0;
+}
+
+.bulk-dropdown__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.15);
+  padding: 0.35rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  animation: fadeIn 0.12s ease;
+}
+
+.bulk-dropdown__item {
+  padding: 0.6rem 0.85rem;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text, #0f172a);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.bulk-dropdown__item:hover {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(124, 58, 237, 0.04));
+  color: #2563eb;
+}
+
+/* Card checkbox */
+.bulk-check {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.bulk-check:hover {
+  background: rgba(255, 255, 255, 1);
+}
+
+.bulk-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #2563eb;
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.project-card--selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
 @media (max-width: 900px) {
   .hero {
     flex-direction: column;
@@ -809,6 +1106,16 @@ h1 {
 
   .hero__actions {
     justify-content: flex-start;
+  }
+
+  .bulk-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .bulk-toolbar__right {
+    justify-content: flex-end;
   }
 }
 </style>
