@@ -7,6 +7,7 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -120,15 +121,26 @@ def discover_random_entry(
     timeout: float = 20.0,
 ) -> BrettzoneEntry:
     rand = rng or random.Random()
-    pages = source_pages or ["https://brettzone.net/", "https://brettzone.net/index.php"]
+    pages = source_pages or [
+        "https://brettzone.net/",
+        "https://www.brettzone.net/",
+        "https://brettzone.net/index.php",
+        "https://www.brettzone.net/index.php",
+    ]
     fight_links: set[str] = set()
 
     for page_url in pages:
-        html = fetch_html(page_url, timeout=timeout)
-        fight_links.update(discover_fight_links(page_url, html))
+        try:
+            html = fetch_html(page_url, timeout=timeout)
+            fight_links.update(discover_fight_links(page_url, html))
+        except (URLError, HTTPError, OSError):
+            continue
 
     if not fight_links:
-        raise ValueError("No BrettZone fight links found for random selection.")
+        raise ValueError(
+            "Could not reach BrettZone or discover fights. "
+            "Please try again later or import via direct URL."
+        )
 
     shuffled_fights = list(fight_links)
     rand.shuffle(shuffled_fights)
@@ -159,7 +171,10 @@ def discover_entry_from_url(
             return rand.choice(entries)
         raise ValueError("No downloadable videos found at the provided fight URL.")
 
-    html = fetch_html(brettzone_url, timeout=timeout)
+    try:
+        html = fetch_html(brettzone_url, timeout=timeout)
+    except (URLError, HTTPError, OSError) as exc:
+        raise ValueError("Could not fetch the provided BrettZone URL.") from exc
     # If page itself has recordings, use that.
     recordings_here = list_downloadables(brettzone_url, timeout=timeout)
     if recordings_here:

@@ -3,6 +3,7 @@
 import asyncio
 import threading
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -79,6 +80,12 @@ async def import_brettzone_video(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from exc
+    except (URLError, HTTPError, OSError) as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to reach BrettZone. Please try again or use a direct URL.",
         ) from exc
     except Exception as exc:
         await db.rollback()
