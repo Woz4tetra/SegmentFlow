@@ -116,9 +116,15 @@ def _extract_robot_names_from_recording(recording: dict) -> list[str]:
         if not isinstance(value, str):
             continue
         key_lower = key.lower()
-        if "robot" not in key_lower and "bot" not in key_lower:
-            continue
         if "name" not in key_lower:
+            continue
+        # Support both explicit robot/bot fields and red/blue side name fields.
+        if (
+            "robot" not in key_lower
+            and "bot" not in key_lower
+            and "red" not in key_lower
+            and "blue" not in key_lower
+        ):
             continue
         display_name = _display_robot_name(value)
         if _is_valid_robot_name(display_name):
@@ -139,7 +145,9 @@ def _extract_robot_thumbnails_from_recording(recording: dict, base_url: str) -> 
         if not side:
             continue
 
-        if ("robot" in key_lower or "bot" in key_lower) and "name" in key_lower:
+        if ("name" in key_lower) and (
+            "robot" in key_lower or "bot" in key_lower or "red" in key_lower or "blue" in key_lower
+        ):
             display_name = _display_robot_name(value)
             if _is_valid_robot_name(display_name):
                 side_to_name[side] = display_name
@@ -167,6 +175,7 @@ def _extract_robot_names_from_html(html: str) -> list[str]:
     patterns = [
         r'"(?:red|blue)[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
         r'"(?:robot|bot)[A-Za-z_]*?(?:red|blue)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+        r'"(?:red|blue)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, html, flags=re.IGNORECASE):
@@ -185,6 +194,7 @@ def _extract_robot_thumbnails_from_html(html: str, base_url: str) -> dict[str, s
         name_patterns = [
             rf'"{side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
             rf'"(?:robot|bot)[A-Za-z_]*?{side}[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+            rf'"{side}[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
         ]
         image_patterns = [
             rf'"{side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)"\s*:\s*"([^"]+)"',

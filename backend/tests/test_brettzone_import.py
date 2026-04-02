@@ -71,6 +71,33 @@ def test_list_downloadables_extracts_robot_names(monkeypatch: pytest.MonkeyPatch
     assert entries[0].robot_names == ["Big Dill", "Riptide"]
 
 
+def test_list_downloadables_extracts_red_blue_name_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robot names are extracted when metadata uses redName/blueName keys."""
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        recordings: [
+          {
+            "proxy720":"https://cdn.example.com/a.mp4",
+            "camera":"Overhead 1",
+            "category":"overhead",
+            "redName":"Ripperoni",
+            "blueName":"Whiplash"
+          }
+        ],
+        gameID: "123"
+      };
+    </script>
+    """
+    monkeypatch.setattr("app.core.brettzone.fetch_html", lambda url, timeout=20.0: sample_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+
+    assert len(entries) == 1
+    assert entries[0].robot_names == ["Ripperoni", "Whiplash"]
+
+
 def test_list_downloadables_extracts_robot_thumbnails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Robot thumbnail URLs are extracted from BrettZone metadata."""
     sample_html = """
