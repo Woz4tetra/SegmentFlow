@@ -248,9 +248,22 @@ def _extract_foreground_pixels_bgr(image: np.ndarray) -> np.ndarray:
     bg_color = np.median(border_pixels, axis=0)
     distances = np.linalg.norm(pixels.astype(np.float32) - bg_color.astype(np.float32), axis=1)
     foreground_pixels = pixels[distances > 30.0]
-    if foreground_pixels.size == 0:
-        return pixels
-    return foreground_pixels
+    candidate_pixels = foreground_pixels if foreground_pixels.size != 0 else pixels
+    if candidate_pixels.size == 0:
+        return candidate_pixels
+
+    # Remove near-neutral background tones (black/white/gray) so color selection
+    # focuses on robot highlights/accents.
+    hsv = cv2.cvtColor(candidate_pixels.reshape((-1, 1, 3)), cv2.COLOR_BGR2HSV).reshape((-1, 3))
+    saturation = hsv[:, 1]
+    value = hsv[:, 2]
+    colorful_midtones_mask = (saturation >= 35) & (value >= 30) & (value <= 245)
+    filtered_pixels = candidate_pixels[colorful_midtones_mask]
+
+    # Keep behavior robust for robots with very little chroma in their thumbnail.
+    if filtered_pixels.shape[0] >= 128:
+        return filtered_pixels
+    return candidate_pixels
 
 
 def _dominant_color_hex_from_image(image: np.ndarray) -> str:
@@ -265,7 +278,7 @@ def _dominant_color_hex_from_image(image: np.ndarray) -> str:
         sample = sample[indices]
 
     sample_float = sample.astype(np.float32)
-    k = min(5, max(1, sample_float.shape[0]))
+    k = min(6, max(1, sample_float.shape[0]))
     if sample_float.shape[0] < k:
         k = sample_float.shape[0]
 
@@ -279,8 +292,30 @@ def _dominant_color_hex_from_image(image: np.ndarray) -> str:
         cv2.KMEANS_PP_CENTERS,
     )
     label_counts = np.bincount(labels.flatten(), minlength=k)
-    dominant_index = int(np.argmax(label_counts))
-    b, g, r = centers[dominant_index]
+    centers_u8 = np.clip(centers, 0, 255).astype(np.uint8)
+    centers_hsv = cv2.cvtColor(centers_u8.reshape((-1, 1, 3)), cv2.COLOR_BGR2HSV).reshape((-1, 3))
+
+    best_index = -1
+    best_score = -1.0
+    for idx in range(k):
+        count = float(label_counts[idx])
+        sat = float(centers_hsv[idx][1])
+        val = float(centers_hsv[idx][2])
+
+        # Reject likely black/white/gray background clusters.
+        if sat < 28 or val < 28 or val > 245:
+            continue
+
+        # Favor saturated highlight colors while still considering cluster area.
+        score = count * ((sat / 255.0) ** 1.35) * (0.65 + min(val, 220.0) / 255.0)
+        if score > best_score:
+            best_score = score
+            best_index = idx
+
+    if best_index < 0:
+        best_index = int(np.argmax(label_counts))
+
+    b, g, r = centers[best_index]
     return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
 
 
