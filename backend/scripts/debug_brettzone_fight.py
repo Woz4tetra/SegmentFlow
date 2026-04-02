@@ -66,7 +66,7 @@ def _print_summary(entries: list, limit: int) -> None:
     cameras = Counter(entry.camera for entry in entries)
     categories = Counter(entry.category for entry in entries)
     all_robot_names = sorted({name for entry in entries for name in entry.robot_names})
-    all_thumbnail_names = sorted({name for entry in entries for name in entry.robot_thumbnails.keys()})
+    all_thumbnail_names = sorted({name for entry in entries for name in entry.robot_thumbnails})
 
     print("camera_counts=", json.dumps(cameras, indent=2))
     print("category_counts=", json.dumps(categories, indent=2))
@@ -91,7 +91,7 @@ def _print_verbose_diagnostics(url: str, timeout: float) -> None:
     if recordings:
         key_counter: Counter[str] = Counter()
         for rec in recordings:
-            for key in rec.keys():
+            for key in rec:
                 key_counter[key] += 1
         print("recording_keys_top20=", json.dumps(dict(key_counter.most_common(20)), indent=2))
 
