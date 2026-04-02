@@ -294,13 +294,16 @@ class BrettzoneImportRequest(BaseModel):
         cleaned = v.strip()
         if not cleaned:
             return None
+        lowered = cleaned.lower()
         if not (
-            cleaned.startswith("https://brettzone.net/")
-            or cleaned.startswith("http://brettzone.net/")
-            or cleaned.startswith("https://www.brettzone.net/")
-            or cleaned.startswith("http://www.brettzone.net/")
+            lowered.startswith("https://brettzone.net/")
+            or lowered.startswith("http://brettzone.net/")
+            or lowered.startswith("https://www.brettzone.net/")
+            or lowered.startswith("http://www.brettzone.net/")
+            or lowered.startswith("https://brettzone.nhrl.io/")
+            or lowered.startswith("http://brettzone.nhrl.io/")
         ):
-            raise ValueError("brettzone_url must point to brettzone.net")
+            raise ValueError("brettzone_url must point to a BrettZone host")
         return cleaned
 
 

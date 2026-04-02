@@ -22,6 +22,12 @@ FIGHT_RE = re.compile(
     re.IGNORECASE,
 )
 FIGHT_URL_PATTERN = re.compile(r"fightReviewSync\.php\?gameID=", re.IGNORECASE)
+DEFAULT_SOURCE_PAGES = [
+    "https://brettzone.nhrl.io/brettZone/index.php",
+    "https://brettzone.nhrl.io/brettZone/robotFights.php",
+    "https://brettzone.net/",
+    "https://www.brettzone.net/",
+]
 
 
 @dataclass(slots=True)
@@ -121,12 +127,7 @@ def discover_random_entry(
     timeout: float = 20.0,
 ) -> BrettzoneEntry:
     rand = rng or random.Random()
-    pages = source_pages or [
-        "https://brettzone.net/",
-        "https://www.brettzone.net/",
-        "https://brettzone.net/index.php",
-        "https://www.brettzone.net/index.php",
-    ]
+    pages = source_pages or DEFAULT_SOURCE_PAGES
     fight_links: set[str] = set()
 
     for page_url in pages:
@@ -161,8 +162,9 @@ def discover_entry_from_url(
     parsed = urlparse(brettzone_url)
     if not parsed.scheme or not parsed.netloc:
         raise ValueError("Invalid BrettZone URL.")
-    if "brettzone.net" not in parsed.netloc.lower():
-        raise ValueError("URL must be on brettzone.net.")
+    host = parsed.netloc.lower()
+    if "brettzone" not in host:
+        raise ValueError("URL must be a BrettZone URL.")
 
     # Direct fight page.
     if FIGHT_URL_PATTERN.search(brettzone_url):
