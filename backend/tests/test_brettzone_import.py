@@ -14,6 +14,8 @@ def test_robot_name_validation_accepts_real_names() -> None:
     """Real robot names should be accepted by validation."""
     assert _is_valid_robot_name("Paradox")
     assert _is_valid_robot_name("Buzzzz-Kill")
+    assert _is_valid_robot_name("0-0")
+    assert not _is_valid_robot_name("0W-0L")
     assert not _is_valid_robot_name("unknown")
 
 

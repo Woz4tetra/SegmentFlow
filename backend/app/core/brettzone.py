@@ -186,7 +186,10 @@ def _is_valid_robot_name(name: str) -> bool:
         return False
     if normalized in {"n/a", "na", "unknown", "tbd", "none", "null"}:
         return False
-    if not re.search(r"[a-z]", normalized):
+    has_letter = bool(re.search(r"[a-z]", normalized))
+    if not has_letter and not re.fullmatch(r"\d+(?:\s*[-_/\.]\s*\d+)+", normalized):
+        # Allow numeric robot monikers such as "0-0" while still rejecting
+        # generic numeric/UI fragments.
         return False
     # Reject common UI fragments/scores that appear near fight page text.
     blocked_tokens = (
