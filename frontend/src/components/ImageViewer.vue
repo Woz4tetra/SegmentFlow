@@ -149,6 +149,11 @@ const latestRequestByLabel = ref<Map<string, string>>(new Map());
 // Debounce timers per label: delays save + SAM inference by 1s after last click
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const DEBOUNCE_MS = 1000;
+const MASK_RECONCILE_RETRIES = 8;
+const MASK_RECONCILE_DELAY_MS = 150;
+
+// Token per label to cancel stale async mask reconciliations
+const maskReconcileTokenByLabel = ref<Map<string, number>>(new Map());
 
 // Cleanup references
 let resizeObserver: ResizeObserver | null = null;
@@ -681,6 +686,54 @@ function requestSAMInference(labelId: string): void {
   websocket.send(JSON.stringify(request));
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startMaskReconcile(labelId: string, requestId: string, frameNumber: number): void {
+  const nextToken = (maskReconcileTokenByLabel.value.get(labelId) ?? 0) + 1;
+  maskReconcileTokenByLabel.value.set(labelId, nextToken);
+
+  void reconcileMaskFromServer(labelId, requestId, frameNumber, nextToken);
+}
+
+async function reconcileMaskFromServer(
+  labelId: string,
+  requestId: string,
+  frameNumber: number,
+  token: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < MASK_RECONCILE_RETRIES; attempt++) {
+    // Abort if frame changed or a newer request/token exists for this label.
+    if (props.frameNumber !== frameNumber) return;
+    if (latestRequestByLabel.value.get(labelId) !== requestId) return;
+    if (maskReconcileTokenByLabel.value.get(labelId) !== token) return;
+
+    try {
+      const response = await api.get(
+        `/projects/${props.projectId}/frames/${frameNumber}/masks`,
+        { params: { label_id: labelId } },
+      );
+      const masks = response.data as Array<{ label_id: string; contour_polygon: any; area: number }>;
+      if (masks.length > 0) {
+        const maskData = masks[0];
+        const mask: MaskContour = {
+          labelId,
+          contourPolygon: maskData.contour_polygon,
+          area: maskData.area,
+        };
+        masksByLabel.value.set(labelId, mask);
+        renderMaskContour(mask);
+        return;
+      }
+    } catch (error) {
+      console.warn('Mask reconcile attempt failed:', error);
+    }
+
+    await sleep(MASK_RECONCILE_DELAY_MS);
+  }
+}
+
 function renderMaskContour(mask: MaskContour): void {
   if (!fabricCanvas || !fabricImg || !mask.contourPolygon) {
     return;
@@ -1033,13 +1086,10 @@ function connectWebSocket(): void {
           return;
         }
         
-        // Render the mask from RLE for immediate preview
-        // The backend has already saved it when points were saved
-        // Note: We do NOT auto-reload from database here because it causes race conditions
-        // when user adds multiple points quickly. The RLE preview is accurate and the
-        // contour-based mask will be loaded when navigating to another frame and back,
-        // or on page refresh.
+        // Render RLE immediately for low-latency feedback.
         renderMaskFromRLE(data.mask_rle, labelId);
+        // Then reconcile with persisted contour mask for accurate final display.
+        startMaskReconcile(labelId, requestId, props.frameNumber);
       } else if (data.status === 'error') {
         console.error('SAM inference error:', data.error);
       }
@@ -1384,6 +1434,7 @@ watch(() => props.imageUrl, (newUrl) => {
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
     latestRequestByLabel.value.clear(); // Clear pending request tracking
+    maskReconcileTokenByLabel.value.clear();
     loadImage(newUrl);
   }
 }, { immediate: true });
@@ -1399,6 +1450,7 @@ watch(() => props.frameNumber, async () => {
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
     latestRequestByLabel.value.clear();
+    maskReconcileTokenByLabel.value.clear();
     await loadAllExistingData();
   }
 });
@@ -1480,6 +1532,7 @@ onBeforeUnmount(() => {
     fabricCanvas = null;
     fabricImg = null;
   }
+  maskReconcileTokenByLabel.value.clear();
 });
 </script>
 
