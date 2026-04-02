@@ -25,7 +25,13 @@
     </div>
 
     <!-- Mode indicator -->
-    <div v-if="imageLoaded" class="mode-indicator" :class="{ exclude: !includeMode }">
+    <div
+      v-if="imageLoaded"
+      class="mode-indicator"
+      :class="{ exclude: !includeMode }"
+      title="Click to toggle include/exclude"
+      @click="toggleIncludeMode"
+    >
       {{ includeMode ? '+ Include' : '− Exclude' }}
     </div>
   </div>
@@ -106,6 +112,17 @@ const lastPointerPosition = ref({ x: 0, y: 0 });
 
 // Point mode (include/exclude)
 const includeMode = ref(true);
+
+function setIncludeMode(include: boolean): void {
+  includeMode.value = include;
+  if (containerRef.value) {
+    containerRef.value.style.cursor = include ? 'crosshair' : 'not-allowed';
+  }
+}
+
+function toggleIncludeMode(): void {
+  setIncludeMode(!includeMode.value);
+}
 
 // Store points and masks PER LABEL - this is the key fix
 const pointsByLabel = ref<Map<string, Point[]>>(new Map());
@@ -1362,6 +1379,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 // Watch for image URL changes - load new image
 watch(() => props.imageUrl, (newUrl) => {
   if (newUrl) {
+    setIncludeMode(true);
     clearAllVisuals();
     pointsByLabel.value.clear();
     masksByLabel.value.clear();
@@ -1373,6 +1391,8 @@ watch(() => props.imageUrl, (newUrl) => {
 // Watch for frame changes - reload data
 watch(() => props.frameNumber, async () => {
   if (fabricCanvas && fabricImg && props.projectId) {
+    // Reset to include mode when changing frames.
+    setIncludeMode(true);
     // Flush any pending debounced sends before switching frames
     flushDebounceTimers();
     clearAllVisuals();
@@ -1398,15 +1418,9 @@ function handleKeyPress(e: KeyboardEvent): void {
   if (key === 'r') {
     resetView();
   } else if (key === 'i') {
-    includeMode.value = true;
-    if (containerRef.value) {
-      containerRef.value.style.cursor = 'crosshair';
-    }
+    setIncludeMode(true);
   } else if (key === 'u') {
-    includeMode.value = false;
-    if (containerRef.value) {
-      containerRef.value.style.cursor = 'not-allowed';
-    }
+    setIncludeMode(false);
   }
 }
 
@@ -1538,7 +1552,9 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
   font-weight: 600;
   border-radius: 6px;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
   transition: background 0.2s ease;
 }
 

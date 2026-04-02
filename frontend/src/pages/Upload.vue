@@ -219,32 +219,36 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
   await api.post(`/projects/${projectId}/upload/complete`);
   uploadProgress.value = 55;
   console.log('Upload completed successfully! Waiting for image conversion...');
-  
-  // Poll for conversion progress (55-95% progress)
+  const conversionOk = await waitForConversion(projectId, 55);
+  if (!conversionOk) {
+    return;
+  }
+  uploadProgress.value = 100;
+  console.log('Image conversion complete!');
+}
+
+async function waitForConversion(projectId: string, progressStart: number): Promise<boolean> {
   isConverting.value = true;
   conversionProgress.value = { saved: 0, total: 0 };
   uploadMessage.value = 'Converting video to images...';
-  
+
   const pollConversion = async () => {
     try {
       const { data } = await api.get(`/projects/${projectId}/conversion/progress`);
       conversionProgress.value = data;
-      
-      // Check if conversion failed
+
       if (data.error) {
         if (conversionPollInterval) clearInterval(conversionPollInterval);
-        isConverting.value = false;
-        errorMessage.value = 'Video upload failed. Please try again with a different video file.';
+        errorMessage.value = 'Video conversion failed. Please try another video.';
         return false;
       }
-      
+
       if (data.total > 0) {
-        // Map 55-95% to conversion progress
-        const conversionPercent = (data.saved / data.total) * 40;
-        uploadProgress.value = Math.round(Math.min(55 + conversionPercent, 94));
+        // Map conversion progress to progressStart..94
+        const conversionPercent = (data.saved / data.total) * (94 - progressStart);
+        uploadProgress.value = Math.round(Math.min(progressStart + conversionPercent, 94));
       }
-      
-      // Check if conversion is done (saved === total and both > 0)
+
       if (data.total > 0 && data.saved >= data.total) {
         uploadProgress.value = 95;
         if (conversionPollInterval) clearInterval(conversionPollInterval);
@@ -256,11 +260,9 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
       return false;
     }
   };
-  
-  // Wait for conversion to complete or timeout after 5 minutes
-  const timeout = 5 * 60 * 1000; // 5 minutes
-  let done = false;
 
+  const timeout = 5 * 60 * 1000;
+  let done = false;
   await new Promise<void>((resolve) => {
     const startTime = Date.now();
 
@@ -274,6 +276,7 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
 
     const timeoutId = setTimeout(() => {
       console.warn('Image conversion timed out after 5 minutes.');
+      errorMessage.value = 'Image conversion timed out. Please wait and try again.';
       finish();
     }, timeout);
 
@@ -283,24 +286,21 @@ async function uploadVideoFile(projectId: string, file: File): Promise<void> {
         clearTimeout(timeoutId);
         finish();
       } else if (Date.now() - startTime >= timeout) {
-        // Safety check in case timeout fires slightly later
         clearTimeout(timeoutId);
         console.warn('Image conversion timed out after 5 minutes.');
+        errorMessage.value = 'Image conversion timed out. Please wait and try again.';
         finish();
       }
     };
 
-    // Initial poll
     pollAndCheck();
-
-    // If not done, set up polling interval
     if (!done) {
-      conversionPollInterval = setInterval(pollAndCheck, 500); // Poll every 500ms
+      conversionPollInterval = setInterval(pollAndCheck, 500);
     }
   });
+
   isConverting.value = false;
-  uploadProgress.value = 100;
-  console.log('Image conversion complete!');
+  return done;
 }
 
 const handleFileSelect = async (file: File) => {
@@ -376,9 +376,14 @@ async function importFromBrettzone(lucky: boolean): Promise<void> {
       lucky,
     });
 
-    uploadProgress.value = 100;
+    uploadProgress.value = 55;
     uploadMessage.value = data?.message || 'Import complete';
     if (data?.project?.id) {
+      const conversionOk = await waitForConversion(data.project.id, 55);
+      if (!conversionOk) {
+        return;
+      }
+      uploadProgress.value = 100;
       await router.push({ name: 'Trim', params: { id: data.project.id } });
     } else {
       errorMessage.value = 'Import succeeded but project ID was missing.';
