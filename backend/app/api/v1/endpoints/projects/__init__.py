@@ -13,6 +13,7 @@ from .get_project import get_project
 from .get_thumbnail import get_thumbnail
 from .get_upload_progress import get_upload_progress
 from .init_video_upload import init_video_upload
+from .import_brettzone_video import import_brettzone_video
 from .label_settings import list_project_label_settings, update_project_label_setting
 from .list_project_images import list_project_images
 from .list_projects import list_projects
@@ -43,6 +44,7 @@ __all__ = [
     "get_thumbnail",
     "get_upload_progress",
     "init_video_upload",
+    "import_brettzone_video",
     "list_project_label_settings",
     "list_project_images",
     "list_projects",

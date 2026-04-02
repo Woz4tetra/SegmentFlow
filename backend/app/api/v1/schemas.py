@@ -267,6 +267,53 @@ class VideoUploadCompleteResponse(BaseModel):
     message: str = Field(..., description="Confirmation message")
 
 
+class BrettzoneImportRequest(BaseModel):
+    """Schema for importing a video directly from BrettZone."""
+
+    brettzone_url: str | None = Field(
+        default=None,
+        description="Specific BrettZone URL to import from. Optional when lucky=true.",
+    )
+    project_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Optional override name for the created project.",
+    )
+    lucky: bool = Field(
+        default=False,
+        description="If true, ignore URL and import a random BrettZone video.",
+    )
+
+    @field_validator("brettzone_url")
+    @classmethod
+    def validate_brettzone_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        if not (
+            cleaned.startswith("https://brettzone.net/")
+            or cleaned.startswith("http://brettzone.net/")
+            or cleaned.startswith("https://www.brettzone.net/")
+            or cleaned.startswith("http://www.brettzone.net/")
+        ):
+            raise ValueError("brettzone_url must point to brettzone.net")
+        return cleaned
+
+
+class BrettzoneImportResponse(BaseModel):
+    """Schema for BrettZone import response."""
+
+    project: ProjectResponse
+    fight_url: str = Field(..., description="Fight page URL selected for this import")
+    media_url: str = Field(..., description="Direct video URL downloaded")
+    camera: str = Field(..., description="Camera label for the selected recording")
+    file_size: int = Field(..., ge=0, description="Size of downloaded video in bytes")
+    message: str = Field(..., description="Import status message")
+
+
 # ===== Image Schemas =====
 
 
