@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -79,10 +80,11 @@ class SAM3Tracker:
         # Lock for thread-safe temp directory management
         self._temp_dir_lock = threading.Lock()
 
-        # Lock for inference operations - ensures only one inference runs at a time
+        # Reentrant lock for inference operations - ensures only one inference
+        # runs at a time while still allowing atomic "set context + infer" wrappers
         # This prevents race conditions where a new request deletes temp files
         # while a previous request's SAM3 init_state is still loading them
-        self._inference_lock = threading.Lock()
+        self._inference_lock = threading.RLock()
 
         # Set up device (model loaded lazily on first use)
         self.device = torch.device(f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -645,7 +647,7 @@ class SAM3Tracker:
         points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]],
         propagate_length: int,
         additional_points_by_frame: dict[int, dict[int, tuple[np.ndarray, np.ndarray]]] | None = None,
-        callback: Callable[[int, float], None] | None = None,
+        callback: Callable[[int, float, float], None] | None = None,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, np.ndarray]]:
         """Prepare frames, add points, and propagate masks.
 
@@ -716,6 +718,7 @@ class SAM3Tracker:
             video_segments: dict[int, dict[int, np.ndarray]] = {}
 
             with torch.cuda.device(self.gpu_id):
+                propagation_start = time.perf_counter()
                 for (
                     local_frame_idx,
                     obj_ids,
@@ -741,7 +744,15 @@ class SAM3Tracker:
 
                     if callback:
                         progress = (local_frame_idx + 1) / max_frames
-                        callback(original_frame_idx, progress)
+                        processed_frames = local_frame_idx + 1
+                        elapsed = time.perf_counter() - propagation_start
+                        remaining_frames = max_frames - processed_frames
+                        if processed_frames > 0 and remaining_frames > 0:
+                            avg_seconds_per_frame = elapsed / processed_frames
+                            sam_remaining_ms = remaining_frames * avg_seconds_per_frame * 1000
+                        else:
+                            sam_remaining_ms = 0.0
+                        callback(original_frame_idx, progress, sam_remaining_ms)
 
             # Copy original frames before cleanup
             original_frames = dict(self._original_frames)
@@ -929,6 +940,66 @@ class SAM3Tracker:
             points=points,
             labels=labels,
         )
+
+    def propagate_from_project(
+        self,
+        images_dir: str,
+        source_frame: int,
+        points_by_obj: dict[int, tuple[np.ndarray, np.ndarray]],
+        propagate_length: int,
+        additional_points_by_frame: dict[int, dict[int, tuple[np.ndarray, np.ndarray]]] | None = None,
+        callback: Callable[[int, float, float], None] | None = None,
+    ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, np.ndarray]]:
+        """Atomically set project context and run propagation.
+
+        This method prevents cross-project races by keeping images directory binding
+        and inference under a single tracker lock.
+        """
+        with self._inference_lock:
+            self.set_images_dir(images_dir)
+            return self.propagate_from_frame(
+                source_frame=source_frame,
+                points_by_obj=points_by_obj,
+                propagate_length=propagate_length,
+                additional_points_by_frame=additional_points_by_frame,
+                callback=callback,
+            )
+
+    def get_preview_mask_for_project(
+        self,
+        images_dir: str,
+        frame_idx: int,
+        obj_id: int,
+        points: np.ndarray,
+        labels: np.ndarray,
+    ) -> np.ndarray | None:
+        """Atomically set project context and run preview inference."""
+        with self._inference_lock:
+            self.set_images_dir(images_dir)
+            return self.get_preview_mask(
+                frame_idx=frame_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+            )
+
+    def get_single_frame_mask_for_project(
+        self,
+        images_dir: str,
+        frame_idx: int,
+        obj_id: int,
+        points: np.ndarray,
+        labels: np.ndarray,
+    ) -> np.ndarray | None:
+        """Atomically set project context and run single-frame inference."""
+        with self._inference_lock:
+            self.set_images_dir(images_dir)
+            return self.get_single_frame_mask(
+                frame_idx=frame_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+            )
 
     def cleanup(self) -> None:
         """Clean up all resources."""

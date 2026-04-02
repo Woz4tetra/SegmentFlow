@@ -39,16 +39,17 @@ async def propagation_progress_websocket(
     logger.info(f"Propagation WebSocket connected for job {job_id}")
 
     # Verify job exists
-    if job_id not in propagation_jobs:
-        await websocket.send_json({"error": f"Job not found: {job_id}"})
-        await websocket.close()
-        return
+    async with job_lock:
+        if job_id not in propagation_jobs:
+            await websocket.send_json({"error": f"Job not found: {job_id}"})
+            await websocket.close()
+            return
 
-    job = propagation_jobs[job_id]
-    if job["project_id"] != project_id:
-        await websocket.send_json({"error": f"Job {job_id} not found for project {project_id}"})
-        await websocket.close()
-        return
+        job = propagation_jobs[job_id]
+        if job["project_id"] != project_id:
+            await websocket.send_json({"error": f"Job {job_id} not found for project {project_id}"})
+            await websocket.close()
+            return
 
     # Register websocket for this job
     async with job_lock:

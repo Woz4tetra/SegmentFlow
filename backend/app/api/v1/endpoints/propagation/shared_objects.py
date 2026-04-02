@@ -6,7 +6,6 @@ used across all propagation endpoints.
 
 import asyncio
 import threading
-import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime
@@ -43,6 +42,54 @@ job_lock = asyncio.Lock()
 
 # Track background tasks to prevent garbage collection
 background_tasks: set[asyncio.Task[None]] = set()
+
+# Shared tracker queue for multi-job GPU scheduling
+tracker_queue: asyncio.Queue[tuple[int, Any]] | None = None
+tracker_queue_lock = asyncio.Lock()
+tracker_count = 0
+
+
+async def _ensure_tracker_queue() -> asyncio.Queue[tuple[int, Any]]:
+    """Initialize shared tracker queue once and return it."""
+    global tracker_queue, tracker_count
+    async with tracker_queue_lock:
+        if tracker_queue is not None and tracker_count > 0:
+            return tracker_queue
+
+        trackers = get_all_trackers()
+        if not trackers:
+            primary_tracker = get_primary_tracker()
+            if primary_tracker is not None:
+                trackers = {primary_tracker.gpu_id: primary_tracker}
+        if not trackers:
+            raise RuntimeError("SAM3 model not initialized")
+
+        # Keep the primary tracker available for interactive manual labeling when possible.
+        primary_tracker = get_primary_tracker()
+        if primary_tracker is not None and len(trackers) > 1:
+            propagation_trackers = {
+                tid: tracker for tid, tracker in trackers.items() if tid != primary_tracker.gpu_id
+            }
+            if propagation_trackers:
+                trackers = propagation_trackers
+
+        queue: asyncio.Queue[tuple[int, Any]] = asyncio.Queue()
+        for tracker_id, tracker in trackers.items():
+            await queue.put((tracker_id, tracker))
+
+        tracker_queue = queue
+        tracker_count = len(trackers)
+        return tracker_queue
+
+
+async def _acquire_tracker() -> tuple[int, Any]:
+    queue = await _ensure_tracker_queue()
+    return await queue.get()
+
+
+async def _release_tracker(entry: tuple[int, Any]) -> None:
+    queue = await _ensure_tracker_queue()
+    queue.put_nowait(entry)
 
 
 def mask_to_contour(mask: np.ndarray) -> tuple[list[list[float]], float]:
@@ -456,9 +503,8 @@ def create_progress_callback(
     total_frames: int,
     progress_state: dict[str, Any],
     progress_lock: threading.Lock,
-    start_time: float,
     loop: asyncio.AbstractEventLoop,
-) -> Callable[[int, float], None]:
+) -> Callable[[int, float, float], None]:
     """Create a progress callback for a segment.
 
     Args:
@@ -470,15 +516,13 @@ def create_progress_callback(
         segments: All segments
         total_frames: Total frames to process
         frames_completed_ref: Mutable reference to frames completed count
-        start_time: Job start time
         loop: Event loop to schedule broadcasts on (for thread-safety)
 
     Returns:
         Progress callback function
     """
 
-    def progress_callback(frame_idx: int, progress: float) -> None:
-        elapsed = time.perf_counter() - start_time
+    def progress_callback(frame_idx: int, progress: float, sam_remaining_ms: float) -> None:
         with progress_lock:
             progress_state["segment_progress"][seg_idx] = progress
             in_progress_frames = sum(
@@ -486,8 +530,6 @@ def create_progress_callback(
                 for idx, seg_progress in progress_state["segment_progress"].items()
             )
             frames_done = progress_state["completed_frames"] + in_progress_frames
-        rate = frames_done / elapsed if elapsed > 0 else 1
-        remaining = (total_frames - frames_done) / rate if rate > 0 else 0
 
         update = PropagationProgressUpdate(
             job_id=job_id,
@@ -499,7 +541,7 @@ def create_progress_callback(
             frames_completed=frames_done,
             total_frames=total_frames,
             progress_percent=(frames_done / total_frames) * 100 if total_frames > 0 else 0,
-            estimated_remaining_ms=remaining * 1000,
+            estimated_remaining_ms=max(float(sam_remaining_ms), 0.0),
             error=None,
         )
         job["progress"] = update
@@ -527,8 +569,7 @@ async def process_segment(
     total_frames: int,
     progress_state: dict[str, Any],
     progress_lock: threading.Lock,
-    start_time: float,
-    tracker: Any,
+    inference_dir: str,
     db_factory: Callable[[], AsyncGenerator[AsyncSession, None]],
 ) -> None:
     """Process a single propagation segment.
@@ -543,7 +584,6 @@ async def process_segment(
         job: Job dict reference
         total_frames: Total frames
         frames_completed_ref: Mutable frames completed count
-        start_time: Job start time
         tracker: SAM3 tracker
         db_factory: Database session factory
     """
@@ -609,7 +649,6 @@ async def process_segment(
         total_frames,
         progress_state,
         progress_lock,
-        start_time,
         loop,
     )
 
@@ -620,15 +659,29 @@ async def process_segment(
         f"({segment.direction})"
     )
 
-    video_segments, _original_frames = await loop.run_in_executor(
-        None,
-        tracker.propagate_from_frame,
-        segment.source_frame,
-        points_by_obj,
-        propagate_length,
-        additional_points_by_frame if additional_points_by_frame else None,
-        progress_callback,
-    )
+    tracker_entry = await _acquire_tracker()
+    tracker_id, tracker = tracker_entry
+    try:
+        video_segments, _original_frames = await loop.run_in_executor(
+            None,
+            tracker.propagate_from_project,
+            inference_dir,
+            segment.source_frame,
+            points_by_obj,
+            propagate_length,
+            additional_points_by_frame if additional_points_by_frame else None,
+            progress_callback,
+        )
+    except Exception:
+        logger.error(
+            "Propagation segment %s failed on tracker %s",
+            seg_idx + 1,
+            tracker_id,
+            exc_info=True,
+        )
+        raise
+    finally:
+        await _release_tracker(tracker_entry)
 
     # Save propagated masks to database
     skip_frames = {segment.source_frame}
@@ -674,17 +727,9 @@ async def run_propagation_job(
     total_frames = sum(seg.num_frames for seg in segments)
     progress_state = {"completed_frames": 0, "segment_progress": {}}
     progress_lock = threading.Lock()
-    start_time = time.perf_counter()
-
     try:
-        # Get SAM3 trackers (one per GPU)
-        trackers = get_all_trackers()
-        if not trackers:
-            primary_tracker = get_primary_tracker()
-            if primary_tracker is not None:
-                trackers = {primary_tracker.gpu_id: primary_tracker}
-        if not trackers:
-            raise RuntimeError("SAM3 model not initialized")
+        # Ensure shared tracker queue is initialized
+        await _ensure_tracker_queue()
 
         # Get project directory
         project_dir = Path(settings.PROJECTS_ROOT_DIR) / str(project_id)
@@ -703,8 +748,7 @@ async def run_propagation_job(
         error_event = asyncio.Event()
         error_ref: dict[str, Exception | None] = {"exc": None}
 
-        async def worker(tracker_id: int, tracker: Any) -> None:
-            tracker.set_images_dir(str(inference_dir))
+        async def worker() -> None:
             while True:
                 item = await segment_queue.get()
                 if item is None:
@@ -728,8 +772,7 @@ async def run_propagation_job(
                         total_frames,
                         progress_state,
                         progress_lock,
-                        start_time,
-                        tracker,
+                        str(inference_dir),
                         db_factory,
                     )
                     with progress_lock:
@@ -737,7 +780,7 @@ async def run_propagation_job(
                         progress_state["completed_frames"] += segment.num_frames
                 except Exception as exc:
                     logger.error(
-                        f"Propagation segment {seg_idx + 1} failed on tracker {tracker_id}: {exc}",
+                        f"Propagation segment {seg_idx + 1} failed: {exc}",
                         exc_info=True,
                     )
                     if not error_event.is_set():
@@ -747,8 +790,8 @@ async def run_propagation_job(
                     segment_queue.task_done()
 
         worker_tasks = [
-            asyncio.create_task(worker(tracker_id, tracker))
-            for tracker_id, tracker in trackers.items()
+            asyncio.create_task(worker())
+            for _ in range(min(len(segments), max(tracker_count, 1)))
         ]
 
         await segment_queue.join()

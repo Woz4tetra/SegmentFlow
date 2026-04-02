@@ -126,8 +126,6 @@ async def _run_sam_inference(
     Returns:
         Numpy array mask if successful, None otherwise
     """
-    tracker.set_images_dir(str(inference_dir))
-
     points_array = np.array(points, dtype=np.float32)
     labels_array = np.array(labels, dtype=np.int32)
     obj_id = hash(str(label_id)) % (2**31)  # Use positive hash as obj_id (SAM expects int32)
@@ -135,7 +133,8 @@ async def _run_sam_inference(
     loop = asyncio.get_event_loop()
     mask = await loop.run_in_executor(
         None,
-        tracker.get_single_frame_mask,
+        tracker.get_single_frame_mask_for_project,
+        str(inference_dir),
         frame_number,
         obj_id,
         points_array,

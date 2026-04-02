@@ -250,9 +250,6 @@ async def _process_sam_request(
                 error=f"Inference directory not found: {inference_dir}",
             )
 
-        # Set images directory for tracker
-        tracker.set_images_dir(str(inference_dir))
-
         # Convert points and labels to numpy arrays
         points_array = np.array(request.points, dtype=np.float32)
         labels_array = np.array(request.labels, dtype=np.int32)
@@ -261,7 +258,8 @@ async def _process_sam_request(
         loop = asyncio.get_event_loop()
         mask = await loop.run_in_executor(
             None,
-            tracker.get_preview_mask,
+            tracker.get_preview_mask_for_project,
+            str(inference_dir),
             request.frame_number,
             hash(str(request.label_id)),  # Use hash of label_id as obj_id
             points_array,
