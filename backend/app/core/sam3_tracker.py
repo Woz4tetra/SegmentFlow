@@ -9,6 +9,7 @@ This module provides SAM3Tracker, a wrapper for SAM3 video segmentation model wi
 
 import contextlib
 import gc
+import inspect
 import os
 import shutil
 import tempfile
@@ -533,10 +534,33 @@ class SAM3Tracker:
 
         logger.info(f"Initializing inference state from: {frames_dir} on cuda:{self.gpu_id}")
 
+        # Mirror the adapter strategy: aggressively offload SAM3 video/state tensors
+        # to CPU when supported so long propagations are not VRAM-bound.
+        init_kwargs: dict[str, bool] = {}
+        if self.predictor is not None:
+            try:
+                sig = inspect.signature(self.predictor.init_state)
+                if "offload_video_to_cpu" in sig.parameters:
+                    init_kwargs["offload_video_to_cpu"] = True
+                if "offload_state_to_cpu" in sig.parameters:
+                    init_kwargs["offload_state_to_cpu"] = True
+            except (TypeError, ValueError):
+                pass
+
         # Ensure we're on the correct GPU when initializing inference state
         with torch.cuda.device(self.gpu_id):
             if self.predictor is not None:
-                self.inference_state = self.predictor.init_state(video_path=frames_dir)
+                self.inference_state = self.predictor.init_state(
+                    video_path=frames_dir,
+                    **init_kwargs,
+                )
+
+        if (
+            self.inference_state is not None
+            and isinstance(self.inference_state, dict)
+            and "offload_state_to_cpu" in self.inference_state
+        ):
+            self.inference_state["offload_state_to_cpu"] = True
 
         logger.info("Inference state initialized")
 

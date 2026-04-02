@@ -15,7 +15,6 @@ from app.api.v1.schemas import (
     PropagationJobResponse,
     PropagationRequest,
 )
-from app.core.config import settings
 from app.core.database import get_db
 from app.models.project import Project
 
@@ -63,10 +62,9 @@ async def start_propagation(
             detail=f"Project not found: {project_id}",
         )
 
-    # Get max propagation length from request or config
-    max_prop_length = settings.MAX_PROPAGATION_LENGTH
-    if request and request.max_propagation_length:
-        max_prop_length = request.max_propagation_length
+    # Default to unlimited propagation range. A request override can still apply
+    # an explicit segment cap for debugging/tuning.
+    max_prop_length = request.max_propagation_length if request else None
 
     # Analyze segments
     segments, source_frames_data = await analyze_propagation_segments(

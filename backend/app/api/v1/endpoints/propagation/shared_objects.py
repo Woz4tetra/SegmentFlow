@@ -184,7 +184,7 @@ def _is_frame_eligible(
 def build_propagation_segments(
     images_by_frame: dict[int, Image],
     labeled_frame_numbers: list[int],
-    max_propagation_length: int,
+    max_propagation_length: int | None,
     has_mask_by_frame: dict[int, bool],
     source_updated_by_frame: dict[int, datetime],
     mask_updated_by_frame: dict[int, datetime],
@@ -198,7 +198,8 @@ def build_propagation_segments(
     Args:
         images_by_frame: Map of frame number to Image
         labeled_frame_numbers: Sorted list of labeled frame numbers
-        max_propagation_length: Maximum frames per segment
+        max_propagation_length: Optional maximum frames per segment.
+            If None, propagate until the next labeled frame (or end of video).
         has_mask_by_frame: Map of frame number to mask presence
         max_frame: Maximum frame number in project
 
@@ -206,19 +207,26 @@ def build_propagation_segments(
         List of PropagationSegment objects
     """
     segments: list[PropagationSegment] = []
+    has_limit = max_propagation_length is not None and max_propagation_length > 0
 
     for i, labeled_frame in enumerate(labeled_frame_numbers):
         interval_anchor_frame: int | None = None
         if i < len(labeled_frame_numbers) - 1:
             next_labeled = labeled_frame_numbers[i + 1]
-            end_frame = min(labeled_frame + max_propagation_length, next_labeled - 1)
+            if has_limit:
+                end_frame = min(labeled_frame + max_propagation_length, next_labeled - 1)
+            else:
+                end_frame = next_labeled - 1
             if (
                 end_frame == next_labeled - 1
                 and (next_labeled - labeled_frame) <= settings.BIG_JUMP_SIZE + 1
             ):
                 interval_anchor_frame = next_labeled
         else:
-            end_frame = min(labeled_frame + max_propagation_length, max_frame)
+            if has_limit:
+                end_frame = min(labeled_frame + max_propagation_length, max_frame)
+            else:
+                end_frame = max_frame
 
         if end_frame <= labeled_frame:
             continue
@@ -281,14 +289,14 @@ def build_propagation_segments(
 async def analyze_propagation_segments(
     project_id: uuid.UUID,
     db: AsyncSession,
-    max_propagation_length: int,
+    max_propagation_length: int | None,
 ) -> tuple[list[PropagationSegment], list[dict[str, Any]]]:
     """Analyze manually labeled frames and determine propagation segments.
 
     Args:
         project_id: UUID of the project
         db: Database session
-        max_propagation_length: Maximum frames per propagation segment
+        max_propagation_length: Optional maximum frames per propagation segment.
 
     Returns:
         Tuple of (segments, source_frames_data)
