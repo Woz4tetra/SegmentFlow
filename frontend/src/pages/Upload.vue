@@ -33,12 +33,43 @@
     </div>
     <div class="upload-card">
       <FileUpload
-        :disabled="isCreatingProject || isConverting"
-        :is-uploading="isCreatingProject || isConverting"
+        :disabled="isBusy"
+        :is-uploading="isBusy"
         :upload-progress="uploadProgress"
         :uploading-file-name="uploadMessage"
         @file-selected="handleFileSelect"
       />
+    </div>
+    <div v-if="routeProjectId === 'new'" class="brettzone-card">
+      <h3>Import from BrettZone</h3>
+      <p class="brettzone-card__lede">
+        Paste a BrettZone URL to pull a video directly, or let luck choose a random fight video.
+      </p>
+      <div class="brettzone-form">
+        <input
+          v-model.trim="brettzoneUrl"
+          type="url"
+          class="brettzone-input"
+          placeholder="https://brettzone.net/..."
+          :disabled="isBusy"
+        />
+        <button
+          class="secondary"
+          type="button"
+          :disabled="isBusy || !brettzoneUrl"
+          @click="importFromBrettzone(false)"
+        >
+          Import URL
+        </button>
+        <button
+          class="secondary lucky"
+          type="button"
+          :disabled="isBusy"
+          @click="importFromBrettzone(true)"
+        >
+          I&apos;m Feeling Lucky
+        </button>
+      </div>
     </div>
   </section>
 </template>
@@ -74,6 +105,7 @@ const isConverting = ref(false);
 const uploadProgress = ref(0);
 const uploadMessage = ref('');
 const errorMessage = ref('');
+const brettzoneUrl = ref('');
 const conversionProgress = ref({ saved: 0, total: 0 });
 let conversionPollInterval: number | null = null;
 
@@ -86,6 +118,7 @@ const conversionProgressPercent = computed(() => {
   if (conversionProgress.value.total === 0) return 0;
   return Math.round((conversionProgress.value.saved / conversionProgress.value.total) * 100);
 });
+const isBusy = computed(() => isCreatingProject.value || isConverting.value);
 
 async function fetchProject(): Promise<void> {
   if (!routeProjectId) return;
@@ -324,6 +357,46 @@ const handleFileSelect = async (file: File) => {
   }
 };
 
+async function importFromBrettzone(lucky: boolean): Promise<void> {
+  errorMessage.value = '';
+  isCreatingProject.value = true;
+  uploadProgress.value = 0;
+  uploadMessage.value = lucky ? 'Finding a random BrettZone video...' : 'Importing BrettZone video...';
+
+  try {
+    const { data } = await api.post<{
+      project: Project;
+      message: string;
+      file_size: number;
+      fight_url: string;
+      media_url: string;
+      camera: string;
+    }>('/projects/import/brettzone', {
+      brettzone_url: lucky ? null : brettzoneUrl.value,
+      lucky,
+    });
+
+    uploadProgress.value = 100;
+    uploadMessage.value = data?.message || 'Import complete';
+    if (data?.project?.id) {
+      await router.push({ name: 'Trim', params: { id: data.project.id } });
+    } else {
+      errorMessage.value = 'Import succeeded but project ID was missing.';
+    }
+  } catch (error) {
+    console.error('Failed to import from BrettZone:', error);
+    if (axios.isAxiosError(error) && error.response?.data?.detail) {
+      errorMessage.value = String(error.response.data.detail);
+    } else {
+      errorMessage.value = 'Failed to import from BrettZone. Please try again.';
+    }
+  } finally {
+    isCreatingProject.value = false;
+    uploadProgress.value = 0;
+    uploadMessage.value = '';
+  }
+}
+
 // On entering Upload stage for an existing project, route to Trim if video exists
 onMounted(async () => {
   // Mark upload stage as visited whenever this page is visited (new or existing project)
@@ -427,6 +500,61 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .error-banner__icon {
   flex-shrink: 0;
   opacity: 0.8;
+}
+
+.brettzone-card {
+  width: 100%;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.brettzone-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.1rem;
+}
+
+.brettzone-card__lede {
+  margin: 0 0 0.9rem;
+  color: var(--muted, #4b5563);
+}
+
+.brettzone-form {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.brettzone-input {
+  flex: 1 1 360px;
+  min-width: 220px;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.95rem;
+}
+
+.secondary {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #dfe3ec);
+  color: var(--text, #0f172a);
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary.lucky {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-color: rgba(124, 58, 237, 0.35);
+  color: #ffffff;
 }
 
 @media (max-width: 900px) {
