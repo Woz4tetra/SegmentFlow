@@ -187,7 +187,44 @@ def _extract_robot_names_from_html(html: str) -> list[str]:
             display_name = _display_robot_name(match.group(1))
             if _is_valid_robot_name(display_name):
                 names.add(display_name)
+    for left, right in _extract_robot_names_from_vs_text(html):
+        if _is_valid_robot_name(left):
+            names.add(left)
+        if _is_valid_robot_name(right):
+            names.add(right)
     return sorted(names)
+
+
+def _extract_robot_names_from_vs_text(html: str) -> list[tuple[str, str]]:
+    """Extract robot names from page text patterns like 'Robot A vs Robot B'."""
+    # Remove tags and collapse whitespace for robust matching.
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = " ".join(text.split())
+    patterns = [
+        r"([A-Za-z0-9!'\-&\.\+ ]{2,50})\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,50})",
+    ]
+    results: list[tuple[str, str]] = []
+    disallowed = {
+        "multi-camera",
+        "single",
+        "clip",
+        "fights",
+        "tournament",
+        "camera",
+        "download all",
+    }
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            left = _display_robot_name(match.group(1))
+            right = _display_robot_name(match.group(2))
+            if not left or not right:
+                continue
+            if left.casefold() in disallowed or right.casefold() in disallowed:
+                continue
+            if len(left) > 50 or len(right) > 50:
+                continue
+            results.append((left, right))
+    return results
 
 
 def _extract_robot_thumbnails_from_html(html: str, base_url: str) -> dict[str, str]:

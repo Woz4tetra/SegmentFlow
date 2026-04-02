@@ -131,6 +131,25 @@ def test_list_downloadables_extracts_unquoted_js_name_keys(
     assert entries[0].robot_names == ["End Game", "SawBlaze"]
 
 
+def test_list_downloadables_extracts_vs_names_from_page_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robot names are extracted from visible page text when metadata keys are absent."""
+    sample_html = """
+    <html>
+      <head><title>Eviscerator vs Injection! - Multi-Camera</title></head>
+      <body>
+        <h1>Eviscerator vs Injection!</h1>
+        <video src="https:\\/\\/cdn.example.com\\/fallback.mp4"></video>
+      </body>
+    </html>
+    """
+    monkeypatch.setattr("app.core.brettzone.fetch_html", lambda url, timeout=20.0: sample_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+    assert len(entries) == 1
+    assert entries[0].robot_names == ["Eviscerator", "Injection!"]
+
+
 def test_list_downloadables_extracts_robot_thumbnails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Robot thumbnail URLs are extracted from BrettZone metadata."""
     sample_html = """
