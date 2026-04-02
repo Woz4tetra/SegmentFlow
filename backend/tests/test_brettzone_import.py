@@ -2,7 +2,12 @@
 
 import pytest
 
-from app.core.brettzone import _is_valid_robot_name, list_downloadables
+from app.core.brettzone import (
+    _extract_robot_names_from_match_data,
+    _extract_robot_thumbnails_from_match_data,
+    _is_valid_robot_name,
+    list_downloadables,
+)
 
 
 def test_robot_name_validation_accepts_real_names() -> None:
@@ -10,6 +15,42 @@ def test_robot_name_validation_accepts_real_names() -> None:
     assert _is_valid_robot_name("Paradox")
     assert _is_valid_robot_name("Buzzzz-Kill")
     assert not _is_valid_robot_name("unknown")
+
+
+def test_extract_robot_names_from_match_data_players() -> None:
+    """Player names are extracted from window.MATCH_DATA.player1/player2."""
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        gameID: "EX-123",
+        tournamentID: "nhrl_sep24_12lb",
+        player1: { name: "Paradox", cleanName: "paradox" },
+        player2: { name: "Buzzzz-Kill", cleanName: "buzzzzkill" }
+      };
+    </script>
+    """
+    assert _extract_robot_names_from_match_data(sample_html) == ["Paradox", "Buzzzz-Kill"]
+
+
+def test_extract_robot_thumbnails_from_match_data_players() -> None:
+    """Player clean names map to getBotPic thumbnail URLs."""
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        gameID: "EX-123",
+        tournamentID: "nhrl_sep24_12lb",
+        player1: { name: "Paradox", cleanName: "paradox" },
+        player2: { name: "Buzzzz-Kill", cleanName: "buzzzzkill" }
+      };
+    </script>
+    """
+    assert _extract_robot_thumbnails_from_match_data(
+        sample_html,
+        "https://brettzone.nhrl.io/brettZone/fightReviewSync.php?gameID=EX-123&tournamentID=nhrl_sep24_12lb",
+    ) == {
+        "Paradox": "https://brettzone.nhrl.io/brettZone/getBotPic.php?bot=paradox",
+        "Buzzzz-Kill": "https://brettzone.nhrl.io/brettZone/getBotPic.php?bot=buzzzzkill",
+    }
 
 
 def test_list_downloadables_filters_program_feed(monkeypatch: pytest.MonkeyPatch) -> None:

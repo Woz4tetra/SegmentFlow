@@ -82,6 +82,82 @@ def _extract_recordings_from_html(html: str) -> list[dict]:
     return [entry for entry in decoded if isinstance(entry, dict)]
 
 
+def _extract_match_data_block(html: str) -> str:
+    """Extract the JS object assigned to window.MATCH_DATA."""
+    start_match = re.search(r"window\.MATCH_DATA\s*=\s*\{", html)
+    if not start_match:
+        return ""
+    start = start_match.end() - 1  # include opening brace
+    brace_depth = 0
+    for idx in range(start, len(html)):
+        ch = html[idx]
+        if ch == "{":
+            brace_depth += 1
+        elif ch == "}":
+            brace_depth -= 1
+            if brace_depth == 0:
+                return html[start : idx + 1]
+    return ""
+
+
+def _extract_robot_names_from_match_data(html: str) -> list[str]:
+    """Extract player names from window.MATCH_DATA payload."""
+    block = _extract_match_data_block(html)
+    if not block:
+        return []
+    patterns = [
+        r"player1\s*:\s*\{[^{}]*?name\s*:\s*\"([^\"]+)\"",
+        r"player2\s*:\s*\{[^{}]*?name\s*:\s*\"([^\"]+)\"",
+        r'"player1"\s*:\s*\{[^{}]*?"name"\s*:\s*"([^"]+)"',
+        r'"player2"\s*:\s*\{[^{}]*?"name"\s*:\s*"([^"]+)"',
+    ]
+    names: list[str] = []
+    for pattern in patterns:
+        match = re.search(pattern, block, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        display_name = _display_robot_name(match.group(1))
+        if _is_valid_robot_name(display_name):
+            names.append(display_name)
+    # Deduplicate while preserving order.
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(name)
+    return deduped
+
+
+def _extract_robot_thumbnails_from_match_data(html: str, base_url: str) -> dict[str, str]:
+    """Extract player name -> thumbnail URL from window.MATCH_DATA payload."""
+    block = _extract_match_data_block(html)
+    if not block:
+        return {}
+
+    def _capture_player_field(player_idx: int, field_name: str) -> str:
+        patterns = [
+            rf"player{player_idx}\s*:\s*\{{[^{{}}]*?{field_name}\s*:\s*\"([^\"]+)\"",
+            rf'"player{player_idx}"\s*:\s*\{{[^{{}}]*?"{field_name}"\s*:\s*"([^"]+)"',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, block, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                return match.group(1).strip()
+        return ""
+
+    thumbnail_map: dict[str, str] = {}
+    for player_idx in (1, 2):
+        display_name = _display_robot_name(_capture_player_field(player_idx, "name"))
+        clean_name = _capture_player_field(player_idx, "cleanName")
+        if not (_is_valid_robot_name(display_name) and clean_name):
+            continue
+        thumbnail_map[display_name] = urljoin(base_url, f"getBotPic.php?bot={clean_name}")
+    return thumbnail_map
+
+
 def _extract_mp4_urls(html: str) -> list[str]:
     urls = re.findall(r"https:\\/\\/[^\"'\\s>]+\\.mp4", html)
     normalized = [url.replace("\\/", "/") for url in urls]
@@ -104,10 +180,32 @@ def _display_robot_name(name: str) -> str:
 
 
 def _is_valid_robot_name(name: str) -> bool:
-    normalized = _normalize_robot_name_for_compare(name)
+    display = _display_robot_name(name)
+    normalized = _normalize_robot_name_for_compare(display)
     if not normalized:
         return False
-    return normalized not in {"n/a", "na", "unknown", "tbd", "none", "null"}
+    if normalized in {"n/a", "na", "unknown", "tbd", "none", "null"}:
+        return False
+    if not re.search(r"[a-z]", normalized):
+        return False
+    # Reject common UI fragments/scores that appear near fight page text.
+    blocked_tokens = (
+        "select",
+        "camera",
+        "clip",
+        "download",
+        "winner",
+        "match",
+        "window",
+        "innerwidth",
+        "begin",
+        "fights",
+        "multi-camera",
+        "fight review",
+    )
+    if any(token in normalized for token in blocked_tokens):
+        return False
+    return not re.search(r"\b\d+[wl]\b", normalized)
 
 
 def _extract_robot_names_from_recording(recording: dict) -> list[str]:
@@ -220,18 +318,13 @@ def _extract_robot_names_from_vs_text(html: str) -> list[tuple[str, str]]:
             return
         results.append((left, right))
 
-    # First pass: title/heading fields are the most reliable.
+    # Title/heading fields are the most reliable signals.
     title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, flags=re.IGNORECASE | re.DOTALL)
     if title_match:
         _extract_vs_pairs_from_text(title_match.group(1), add_pair)
 
     for heading in re.finditer(r"<h[1-3][^>]*>([^<]+)</h[1-3]>", html, flags=re.IGNORECASE):
         _extract_vs_pairs_from_text(heading.group(1), add_pair)
-
-    # Second pass: flattened text catch-all.
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = " ".join(text.split())
-    _extract_vs_pairs_from_text(text, add_pair)
 
     # Deduplicate while preserving order.
     seen: set[tuple[str, str]] = set()
@@ -250,14 +343,13 @@ def _extract_vs_pairs_from_text(
     add_pair: Callable[[str, str], None],
 ) -> None:
     """Extract 'A vs B' pair(s) from text and pass them to add_pair."""
+    clean = " ".join(text.split())
     patterns = [
-        # Common title/header format: "A vs B - Multi-Camera"
-        r"([A-Za-z0-9!'\-&\.\+ ]{2,40}?)\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,40}?)(?=\s*-\s*|$)",
-        # Generic bounded pair in larger text.
-        r"([A-Za-z0-9!'\-&\.\+ ]{2,30}?)\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,30}?)\b",
+        # Canonical fight title/header: "A vs B - ...", or exactly "A vs B"
+        r"^\s*([A-Za-z0-9!'\-&\.\+ ]{2,30}?)\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,30}?)(?:\s*-\s*.*)?\s*$",
     ]
     for pattern in patterns:
-        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+        for match in re.finditer(pattern, clean, flags=re.IGNORECASE):
             add_pair(match.group(1), match.group(2))
 
 
@@ -304,13 +396,21 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
     robot_names: set[str] = set()
     robot_thumbnails: dict[str, str] = {}
 
+    match_data_names = _extract_robot_names_from_match_data(html)
+    for name in match_data_names:
+        robot_names.add(name)
+    for robot_name, image_url in _extract_robot_thumbnails_from_match_data(html, fight_url).items():
+        robot_thumbnails.setdefault(robot_name, image_url)
+
     for recording in recordings:
         for name in _extract_robot_names_from_recording(recording):
             robot_names.add(name)
         for robot_name, image_url in _extract_robot_thumbnails_from_recording(recording, fight_url).items():
             robot_thumbnails.setdefault(robot_name, image_url)
-    for name in _extract_robot_names_from_html(html):
-        robot_names.add(name)
+    # Only fall back to broader HTML name extraction when structured match data is absent.
+    if len(match_data_names) < 2:
+        for name in _extract_robot_names_from_html(html):
+            robot_names.add(name)
     for robot_name, image_url in _extract_robot_thumbnails_from_html(html, fight_url).items():
         robot_thumbnails.setdefault(robot_name, image_url)
 
@@ -319,8 +419,16 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
         single_camera_url = fight_url.replace("fightReviewSync.php", "fightReview.php")
         try:
             single_html = fetch_html(single_camera_url, timeout=timeout)
-            for name in _extract_robot_names_from_html(single_html):
+            single_match_data_names = _extract_robot_names_from_match_data(single_html)
+            for name in single_match_data_names:
                 robot_names.add(name)
+            for robot_name, image_url in _extract_robot_thumbnails_from_match_data(
+                single_html, single_camera_url
+            ).items():
+                robot_thumbnails.setdefault(robot_name, image_url)
+            if len(single_match_data_names) < 2:
+                for name in _extract_robot_names_from_html(single_html):
+                    robot_names.add(name)
             for robot_name, image_url in _extract_robot_thumbnails_from_html(
                 single_html, single_camera_url
             ).items():

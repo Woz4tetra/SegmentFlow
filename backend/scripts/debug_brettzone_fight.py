@@ -16,8 +16,11 @@ import json
 from collections import Counter
 
 from app.core.brettzone import (
+    _extract_match_data_block,
     _extract_recordings_from_html,
     _extract_robot_names_from_html,
+    _extract_robot_names_from_match_data,
+    _extract_robot_thumbnails_from_match_data,
     _extract_robot_names_from_recording,
     _extract_robot_thumbnails_from_html,
     _extract_robot_thumbnails_from_recording,
@@ -87,6 +90,14 @@ def _print_verbose_diagnostics(url: str, timeout: float) -> None:
     print(f"fetched_html_chars={len(html)}")
 
     recordings = _extract_recordings_from_html(html)
+    match_data_block = _extract_match_data_block(html)
+    print(f"match_data_block_chars={len(match_data_block)}")
+    match_data_names = _extract_robot_names_from_match_data(html)
+    print("match_data_extracted_names=", json.dumps(match_data_names, indent=2))
+    match_data_thumbs = _extract_robot_thumbnails_from_match_data(html, url)
+    print("match_data_extracted_thumbnail_names=", json.dumps(sorted(match_data_thumbs.keys()), indent=2))
+    print("match_data_extracted_thumbnail_urls=", json.dumps(match_data_thumbs, indent=2))
+
     print(f"recordings_count={len(recordings)}")
     if recordings:
         key_counter: Counter[str] = Counter()
@@ -114,6 +125,16 @@ def _print_verbose_diagnostics(url: str, timeout: float) -> None:
         print(f"sync_fallback_single_url={single_url}")
         single_html = fetch_html(single_url, timeout=timeout)
         print(f"single_html_chars={len(single_html)}")
+        single_match_data_block = _extract_match_data_block(single_html)
+        print(f"single_match_data_block_chars={len(single_match_data_block)}")
+        single_match_data_names = _extract_robot_names_from_match_data(single_html)
+        print("single_match_data_extracted_names=", json.dumps(single_match_data_names, indent=2))
+        single_match_data_thumbs = _extract_robot_thumbnails_from_match_data(single_html, single_url)
+        print(
+            "single_match_data_extracted_thumbnail_names=",
+            json.dumps(sorted(single_match_data_thumbs.keys()), indent=2),
+        )
+        print("single_match_data_extracted_thumbnail_urls=", json.dumps(single_match_data_thumbs, indent=2))
         single_names = _extract_robot_names_from_html(single_html)
         single_thumbs = _extract_robot_thumbnails_from_html(single_html, single_url)
         print("single_html_extracted_names=", json.dumps(single_names, indent=2))
