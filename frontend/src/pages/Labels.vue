@@ -40,7 +40,7 @@
           </td>
           <td>
             <div class="thumb">
-              <img v-if="lab.thumbnail_path" :src="`${lab.thumbnail_path}?t=${Date.now()}`" alt="Thumbnail" />
+              <img v-if="lab.thumbnail_path" :src="thumbnailSrc(lab.thumbnail_path)" alt="Thumbnail" />
               <span v-else class="placeholder">No thumbnail</span>
             </div>
           </td>
@@ -60,6 +60,7 @@
 
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue';
+import { resolveApiAssetUrl } from '../lib/api';
 import { useLabelsStore, parseColorInput } from '../stores/labels';
 import ColorPicker from '../components/ColorPicker.vue';
 
@@ -125,6 +126,12 @@ async function onThumbUpload(lab: any, e: Event) {
   } else {
     console.error('Thumbnail upload failed:', labelsStore.error);
   }
+}
+
+function thumbnailSrc(path: string): string {
+  const base = resolveApiAssetUrl(path);
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}t=${Date.now()}`;
 }
 </script>
 

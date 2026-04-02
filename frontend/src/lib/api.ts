@@ -27,3 +27,15 @@ export const buildWebSocketUrl = (path: string): string => {
   const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${url.host}${url.pathname}${url.search}`;
 };
+
+export const resolveApiAssetUrl = (maybeRelativeUrl: string): string => {
+  if (/^https?:\/\//i.test(maybeRelativeUrl)) {
+    return maybeRelativeUrl;
+  }
+  const apiUrl = new URL(
+    API_BASE_URL,
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+  );
+  const apiOrigin = `${apiUrl.protocol}//${apiUrl.host}`;
+  return new URL(maybeRelativeUrl, apiOrigin).toString();
+};

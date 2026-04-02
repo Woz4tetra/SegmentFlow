@@ -260,7 +260,7 @@
                   class="label-thumbnail-preview"
                 >
                   <img 
-                    :src="label.thumbnail_path" 
+                    :src="thumbnailSrc(label.thumbnail_path)" 
                     :alt="`${label.name} thumbnail`"
                     @error="handleThumbnailError"
                   />
@@ -311,7 +311,7 @@
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
-import { API_BASE_URL, buildApiUrl } from '../lib/api';
+import { API_BASE_URL, buildApiUrl, resolveApiAssetUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 import ImageViewer from '../components/ImageViewer.vue';
 import FrameStatusSlider from '../components/FrameStatusSlider.vue';
@@ -565,6 +565,10 @@ function handleThumbnailError(event: Event): void {
   if (img && img.parentElement) {
     img.parentElement.style.display = 'none';
   }
+}
+
+function thumbnailSrc(path: string | null): string {
+  return path ? resolveApiAssetUrl(path) : '';
 }
 
 // Clear a specific label's points and masks from the current frame
