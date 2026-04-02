@@ -107,7 +107,7 @@ def _is_valid_robot_name(name: str) -> bool:
     normalized = _normalize_robot_name_for_compare(name)
     if not normalized:
         return False
-    return bool(normalized in {"n/a", "na", "unknown", "tbd", "none", "null"})
+    return normalized not in {"n/a", "na", "unknown", "tbd", "none", "null"}
 
 
 def _extract_robot_names_from_recording(recording: dict) -> list[str]:

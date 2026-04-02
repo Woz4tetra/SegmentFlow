@@ -2,7 +2,14 @@
 
 import pytest
 
-from app.core.brettzone import list_downloadables
+from app.core.brettzone import _is_valid_robot_name, list_downloadables
+
+
+def test_robot_name_validation_accepts_real_names() -> None:
+    """Real robot names should be accepted by validation."""
+    assert _is_valid_robot_name("Paradox")
+    assert _is_valid_robot_name("Buzzzz-Kill")
+    assert not _is_valid_robot_name("unknown")
 
 
 def test_list_downloadables_filters_program_feed(monkeypatch: pytest.MonkeyPatch) -> None:
