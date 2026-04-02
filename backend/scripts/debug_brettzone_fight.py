@@ -15,7 +15,16 @@ import argparse
 import json
 from collections import Counter
 
-from app.core.brettzone import discover_entry_from_url, list_downloadables
+from app.core.brettzone import (
+    _extract_recordings_from_html,
+    _extract_robot_names_from_html,
+    _extract_robot_names_from_recording,
+    _extract_robot_thumbnails_from_html,
+    _extract_robot_thumbnails_from_recording,
+    discover_entry_from_url,
+    fetch_html,
+    list_downloadables,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -39,6 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8,
         help="Max downloadables to print (default: 8)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print detailed extraction diagnostics",
     )
     return parser
 
@@ -67,6 +81,48 @@ def _print_summary(entries: list, limit: int) -> None:
         print(f"    robot_thumbnails={entry.robot_thumbnails}")
 
 
+def _print_verbose_diagnostics(url: str, timeout: float) -> None:
+    print("\n=== Verbose Diagnostics ===")
+    html = fetch_html(url, timeout=timeout)
+    print(f"fetched_html_chars={len(html)}")
+
+    recordings = _extract_recordings_from_html(html)
+    print(f"recordings_count={len(recordings)}")
+    if recordings:
+        key_counter: Counter[str] = Counter()
+        for rec in recordings:
+            for key in rec.keys():
+                key_counter[key] += 1
+        print("recording_keys_top20=", json.dumps(dict(key_counter.most_common(20)), indent=2))
+
+        for idx, rec in enumerate(recordings[:3], start=1):
+            names = _extract_robot_names_from_recording(rec)
+            thumbs = _extract_robot_thumbnails_from_recording(rec, url)
+            camera = rec.get("camera")
+            media = rec.get("proxy720") or rec.get("proxy360") or rec.get("s3path")
+            print(f"recording[{idx}] camera={camera!r} media={media!r}")
+            print(f"recording[{idx}] extracted_names={names}")
+            print(f"recording[{idx}] extracted_thumbnails={thumbs}")
+
+    html_names = _extract_robot_names_from_html(html)
+    html_thumbs = _extract_robot_thumbnails_from_html(html, url)
+    print("html_extracted_names=", json.dumps(html_names, indent=2))
+    print("html_extracted_thumbnail_names=", json.dumps(sorted(html_thumbs.keys()), indent=2))
+
+    if "fightReviewSync.php" in url:
+        single_url = url.replace("fightReviewSync.php", "fightReview.php")
+        print(f"sync_fallback_single_url={single_url}")
+        single_html = fetch_html(single_url, timeout=timeout)
+        print(f"single_html_chars={len(single_html)}")
+        single_names = _extract_robot_names_from_html(single_html)
+        single_thumbs = _extract_robot_thumbnails_from_html(single_html, single_url)
+        print("single_html_extracted_names=", json.dumps(single_names, indent=2))
+        print(
+            "single_html_extracted_thumbnail_names=",
+            json.dumps(sorted(single_thumbs.keys()), indent=2),
+        )
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
@@ -86,6 +142,8 @@ def main() -> int:
             print()
 
         print(f"parsing_fight_url={target_url}")
+        if args.verbose:
+            _print_verbose_diagnostics(target_url, args.timeout)
         entries = list_downloadables(target_url, timeout=args.timeout)
         _print_summary(entries, args.limit)
         return 0
