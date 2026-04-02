@@ -26,7 +26,7 @@ from app.models.project_label_setting import ProjectLabelSetting
 from .shared_objects import conversion_progress, router
 
 logger = get_logger(__name__)
-THUMBNAIL_MAX_DIMENSION = 256
+THUMBNAIL_SIZE = 128
 
 
 @router.post(
@@ -175,15 +175,16 @@ def _download_thumbnail_image(image_url: str) -> np.ndarray | None:
     return image
 
 
-def _resize_thumbnail(image: np.ndarray, max_dimension: int = THUMBNAIL_MAX_DIMENSION) -> np.ndarray:
+def _resize_thumbnail(image: np.ndarray, target_size: int = THUMBNAIL_SIZE) -> np.ndarray:
+    """Center-crop then resize to a fixed square thumbnail size."""
     height, width = image.shape[:2]
-    largest = max(height, width)
-    if largest <= max_dimension:
-        return image
-    scale = max_dimension / float(largest)
-    new_width = max(1, int(width * scale))
-    new_height = max(1, int(height * scale))
-    return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    side = min(height, width)
+    top = max(0, (height - side) // 2)
+    left = max(0, (width - side) // 2)
+    cropped = image[top : top + side, left : left + side]
+    if cropped.shape[0] == target_size and cropped.shape[1] == target_size:
+        return cropped
+    return cv2.resize(cropped, (target_size, target_size), interpolation=cv2.INTER_AREA)
 
 
 def _extract_foreground_pixels_bgr(image: np.ndarray) -> np.ndarray:
