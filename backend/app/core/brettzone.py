@@ -173,9 +173,14 @@ def _extract_robot_names_from_html(html: str) -> list[str]:
     names: set[str] = set()
     # Common patterns seen in embedded page JSON.
     patterns = [
+        # JSON-style quoted keys
         r'"(?:red|blue)[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
         r'"(?:robot|bot)[A-Za-z_]*?(?:red|blue)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
         r'"(?:red|blue)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+        # JS object-style unquoted keys, single or double quoted values
+        r'(?:^|[,{]\s*)(?:red|blue)[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name\s*:\s*[\'"]([^\'"]+)[\'"]',
+        r'(?:^|[,{]\s*)(?:robot|bot)[A-Za-z_]*?(?:red|blue)[A-Za-z_]*?name\s*:\s*[\'"]([^\'"]+)[\'"]',
+        r'(?:^|[,{]\s*)(?:red|blue)[A-Za-z_]*?name\s*:\s*[\'"]([^\'"]+)[\'"]',
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, html, flags=re.IGNORECASE):
@@ -199,6 +204,8 @@ def _extract_robot_thumbnails_from_html(html: str, base_url: str) -> dict[str, s
         image_patterns = [
             rf'"{side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)"\s*:\s*"([^"]+)"',
             rf'"(?:robot|bot)[A-Za-z_]*?{side}[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)"\s*:\s*"([^"]+)"',
+            rf'(?:^|[,\{{]\s*){side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)\s*:\s*[\'"]([^\'"]+)[\'"]',
+            rf'(?:^|[,\{{]\s*)(?:robot|bot)[A-Za-z_]*?{side}[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)\s*:\s*[\'"]([^\'"]+)[\'"]',
         ]
         for pattern in name_patterns:
             for match in re.finditer(pattern, html, flags=re.IGNORECASE):

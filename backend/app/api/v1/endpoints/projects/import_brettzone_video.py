@@ -50,6 +50,13 @@ async def import_brettzone_video(
             entry = await asyncio.to_thread(discover_random_entry)
         else:
             entry = await asyncio.to_thread(discover_entry_from_url, payload.brettzone_url or "")
+        logger.info(
+            "BrettZone import discovery: fight_url=%s camera=%s robots=%s thumbnails=%s",
+            entry.fight_url,
+            entry.camera,
+            entry.robot_names,
+            list(entry.robot_thumbnails.keys()),
+        )
         project_name = payload.project_name or _derive_project_name(entry.fight_url, entry.camera)
         project = Project(name=project_name, active=True)
         db.add(project)
@@ -285,6 +292,8 @@ async def _ensure_robot_labels_for_project(
         seen_names.add(key)
         deduped_names.append(display_name)
 
+    logger.info("BrettZone robot labels candidate names: %s", deduped_names)
+
     thumbnail_by_name: dict[str, str] = {}
     for name, url in robot_thumbnails.items():
         compare_name = _normalized_robot_name(name)
@@ -364,3 +373,8 @@ async def _ensure_robot_labels_for_project(
                 enabled=True,
             )
         )
+    logger.info(
+        "BrettZone label settings upsert complete for project %s: enabled_label_ids=%s",
+        project_id,
+        project_label_ids,
+    )

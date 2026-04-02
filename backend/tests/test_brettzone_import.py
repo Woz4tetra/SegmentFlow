@@ -98,6 +98,39 @@ def test_list_downloadables_extracts_red_blue_name_keys(
     assert entries[0].robot_names == ["Ripperoni", "Whiplash"]
 
 
+def test_list_downloadables_extracts_unquoted_js_name_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robot names are extracted from unquoted JS object keys."""
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        recordings: [
+          {
+            proxy720: "https://cdn.example.com/a.mp4",
+            camera: "Overhead 1",
+            category: "overhead",
+            redName: "End Game",
+            blueName: "SawBlaze"
+          }
+        ],
+        gameID: "123"
+      };
+    </script>
+    """
+    monkeypatch.setattr("app.core.brettzone.fetch_html", lambda url, timeout=20.0: sample_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+
+    # JSON parser fallback won't parse unquoted keys, but regex extraction should still recover names.
+    assert entries == []
+    # Re-run with an MP4 fallback in same page to exercise name extraction on fallback path.
+    fallback_html = sample_html + '<video src="https:\\/\\/cdn.example.com\\/fallback.mp4"></video>'
+    monkeypatch.setattr("app.core.brettzone.fetch_html", lambda url, timeout=20.0: fallback_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+    assert len(entries) == 1
+    assert entries[0].robot_names == ["End Game", "SawBlaze"]
+
+
 def test_list_downloadables_extracts_robot_thumbnails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Robot thumbnail URLs are extracted from BrettZone metadata."""
     sample_html = """
