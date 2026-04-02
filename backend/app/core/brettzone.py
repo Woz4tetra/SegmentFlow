@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
@@ -38,6 +38,8 @@ class BrettzoneEntry:
     fight_url: str
     camera: str
     category: str
+    robot_names: list[str] = field(default_factory=list)
+    robot_thumbnails: dict[str, str] = field(default_factory=dict)
 
 
 def fetch_html(url: str, timeout: float = 20.0) -> str:
@@ -84,10 +86,141 @@ def _extract_mp4_urls(html: str) -> list[str]:
     return sorted(set(normalized))
 
 
+def _normalize_robot_name_for_compare(name: str) -> str:
+    """Normalize robot names for matching/dedup only."""
+    collapsed = " ".join(name.replace("_", " ").split()).strip().casefold()
+    return collapsed
+
+
+def _display_robot_name(name: str) -> str:
+    """Preserve BrettZone display name (trim outer whitespace only)."""
+    return name.strip()
+
+
+def _is_valid_robot_name(name: str) -> bool:
+    normalized = _normalize_robot_name_for_compare(name)
+    if not normalized:
+        return False
+    return bool(normalized in {"n/a", "na", "unknown", "tbd", "none", "null"})
+
+
+def _extract_robot_names_from_recording(recording: dict) -> list[str]:
+    """Extract likely robot names from a recording dict."""
+    robot_names: list[str] = []
+    for key, value in recording.items():
+        if not isinstance(value, str):
+            continue
+        key_lower = key.lower()
+        if "robot" not in key_lower and "bot" not in key_lower:
+            continue
+        if "name" not in key_lower:
+            continue
+        display_name = _display_robot_name(value)
+        if _is_valid_robot_name(display_name):
+            robot_names.append(display_name)
+    return robot_names
+
+
+def _extract_robot_thumbnails_from_recording(recording: dict, base_url: str) -> dict[str, str]:
+    """Extract robot name -> thumbnail URL mappings from a recording dict."""
+    side_to_name: dict[str, str] = {}
+    side_to_image: dict[str, str] = {}
+
+    for key, value in recording.items():
+        if not isinstance(value, str):
+            continue
+        key_lower = key.lower()
+        side = "red" if "red" in key_lower else ("blue" if "blue" in key_lower else "")
+        if not side:
+            continue
+
+        if ("robot" in key_lower or "bot" in key_lower) and "name" in key_lower:
+            display_name = _display_robot_name(value)
+            if _is_valid_robot_name(display_name):
+                side_to_name[side] = display_name
+            continue
+
+        has_image_hint = any(
+            token in key_lower
+            for token in ("image", "img", "thumb", "thumbnail", "photo", "picture", "avatar", "logo")
+        )
+        if has_image_hint and value:
+            side_to_image[side] = urljoin(base_url, value)
+
+    thumbnail_map: dict[str, str] = {}
+    for side, robot_name in side_to_name.items():
+        image_url = side_to_image.get(side)
+        if image_url:
+            thumbnail_map[robot_name] = image_url
+    return thumbnail_map
+
+
+def _extract_robot_names_from_html(html: str) -> list[str]:
+    """Best-effort extraction of robot names from fight page HTML."""
+    names: set[str] = set()
+    # Common patterns seen in embedded page JSON.
+    patterns = [
+        r'"(?:red|blue)[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+        r'"(?:robot|bot)[A-Za-z_]*?(?:red|blue)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            display_name = _display_robot_name(match.group(1))
+            if _is_valid_robot_name(display_name):
+                names.add(display_name)
+    return sorted(names)
+
+
+def _extract_robot_thumbnails_from_html(html: str, base_url: str) -> dict[str, str]:
+    """Best-effort extraction of robot name -> thumbnail URL mappings from HTML."""
+    side_to_name: dict[str, str] = {}
+    side_to_image: dict[str, str] = {}
+
+    for side in ("red", "blue"):
+        name_patterns = [
+            rf'"{side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+            rf'"(?:robot|bot)[A-Za-z_]*?{side}[A-Za-z_]*?name"\s*:\s*"([^"]+)"',
+        ]
+        image_patterns = [
+            rf'"{side}[A-Za-z_]*?(?:robot|bot)[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)"\s*:\s*"([^"]+)"',
+            rf'"(?:robot|bot)[A-Za-z_]*?{side}[A-Za-z_]*?(?:image|img|thumb|thumbnail|photo|picture|avatar|logo)"\s*:\s*"([^"]+)"',
+        ]
+        for pattern in name_patterns:
+            for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+                display_name = _display_robot_name(match.group(1))
+                if _is_valid_robot_name(display_name):
+                    side_to_name[side] = display_name
+        for pattern in image_patterns:
+            for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+                candidate = match.group(1).strip()
+                if candidate:
+                    side_to_image[side] = urljoin(base_url, candidate.replace("\\/", "/"))
+
+    thumbnail_map: dict[str, str] = {}
+    for side, robot_name in side_to_name.items():
+        image_url = side_to_image.get(side)
+        if image_url:
+            thumbnail_map[robot_name] = image_url
+    return thumbnail_map
+
+
 def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneEntry]:
     html = fetch_html(fight_url, timeout=timeout)
     recordings = _extract_recordings_from_html(html)
     entries: list[BrettzoneEntry] = []
+    robot_names: set[str] = set()
+    robot_thumbnails: dict[str, str] = {}
+
+    for recording in recordings:
+        for name in _extract_robot_names_from_recording(recording):
+            robot_names.add(name)
+        for robot_name, image_url in _extract_robot_thumbnails_from_recording(recording, fight_url).items():
+            robot_thumbnails.setdefault(robot_name, image_url)
+    for name in _extract_robot_names_from_html(html):
+        robot_names.add(name)
+    for robot_name, image_url in _extract_robot_thumbnails_from_html(html, fight_url).items():
+        robot_thumbnails.setdefault(robot_name, image_url)
+    robot_names_list = sorted(robot_names)
 
     for recording in recordings:
         media_url = recording.get("proxy720") or recording.get("proxy360") or recording.get("s3path")
@@ -102,6 +235,8 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
                 fight_url=fight_url,
                 camera=camera or "unknown_camera",
                 category=str(recording.get("category") or "unknown_category"),
+                robot_names=robot_names_list,
+                robot_thumbnails=dict(robot_thumbnails),
             )
         )
 
@@ -116,6 +251,8 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
                 fight_url=fight_url,
                 camera="fallback",
                 category="fallback",
+                robot_names=robot_names_list,
+                robot_thumbnails=dict(robot_thumbnails),
             )
         )
     return entries
