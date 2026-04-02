@@ -138,6 +138,10 @@ class LabelBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Label name")
     color_hex: str = Field(..., description="Color in #RRGGBB format")
     thumbnail_path: str | None = Field(default=None, description="Optional path to label thumbnail")
+    always_include: bool = Field(
+        default=False,
+        description="Whether this label is auto-enabled for new BrettZone imports",
+    )
 
     @field_validator("color_hex")
     @classmethod
@@ -167,6 +171,10 @@ class LabelUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     color_hex: str | None = Field(None, description="Color in #RRGGBB format")
     thumbnail_path: str | None = Field(None, description="Path to thumbnail image")
+    always_include: bool | None = Field(
+        None,
+        description="Whether this label is auto-enabled for new BrettZone imports",
+    )
 
     @field_validator("color_hex")
     @classmethod

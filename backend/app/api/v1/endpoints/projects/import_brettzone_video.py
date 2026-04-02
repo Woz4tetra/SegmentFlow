@@ -55,13 +55,12 @@ async def import_brettzone_video(
         db.add(project)
         await db.flush()
 
-        if entry.robot_names:
-            await _ensure_robot_labels_for_project(
-                project.id,
-                entry.robot_names,
-                entry.robot_thumbnails,
-                db,
-            )
+        await _ensure_robot_labels_for_project(
+            project.id,
+            entry.robot_names,
+            entry.robot_thumbnails,
+            db,
+        )
 
         output_path = _project_video_path(project.id, entry.media_url)
         file_size = await asyncio.to_thread(download_video, entry.media_url, output_path)
@@ -273,9 +272,6 @@ async def _ensure_robot_labels_for_project(
     robot_thumbnails: dict[str, str],
     db: AsyncSession,
 ) -> None:
-    if not robot_names:
-        return
-
     deduped_names: list[str] = []
     seen_names: set[str] = set()
     for raw_name in robot_names:
@@ -346,6 +342,11 @@ async def _ensure_robot_labels_for_project(
             label_by_name[compare_key] = existing_label
             logger.info("Created label from BrettZone robot name: %s", robot_display_name)
         project_label_ids.append(existing_label.id)
+
+    # Auto-enable any globally configured always-include labels.
+    for label in label_by_name.values():
+        if label.always_include:
+            project_label_ids.append(label.id)
 
     existing_settings_result = await db.execute(
         select(ProjectLabelSetting).where(ProjectLabelSetting.project_id == project_id)

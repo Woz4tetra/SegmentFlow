@@ -44,6 +44,7 @@ async def create_label(
             name=label_in.name,
             color_hex=label_in.color_hex,
             thumbnail_path=label_in.thumbnail_path,
+            always_include=label_in.always_include,
         )
         db.add(db_label)
         await db.commit()
