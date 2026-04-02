@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import cv2
 import numpy as np
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.projects.complete_video_upload import convert_video_task
@@ -39,6 +39,8 @@ async def import_brettzone_video(
     db: AsyncSession = Depends(get_db),
 ) -> BrettzoneImportResponse:
     """Create a new project and import its video from BrettZone."""
+    created_project_id: UUID | None = None
+    video_update_applied = False
     try:
         if not payload.lucky and not payload.brettzone_url:
             raise HTTPException(
@@ -61,6 +63,7 @@ async def import_brettzone_video(
         project = Project(name=project_name, active=True)
         db.add(project)
         await db.flush()
+        created_project_id = project.id
 
         await _ensure_robot_labels_for_project(
             project.id,
@@ -68,26 +71,35 @@ async def import_brettzone_video(
             entry.robot_thumbnails,
             db,
         )
+        # Persist project and label settings before slow network/file operations.
+        await db.commit()
 
         output_path = _project_video_path(project.id, entry.media_url)
         file_size = await asyncio.to_thread(download_video, entry.media_url, output_path)
 
-        project.video_path = str(output_path)
-        project.stage = ProjectStage.TRIM.value
-        db.add(project)
+        # Avoid stale ORM instance updates by writing directly by primary key.
+        update_result = await db.execute(
+            update(Project)
+            .where(Project.id == project.id)
+            .values(video_path=str(output_path), stage=ProjectStage.TRIM.value)
+        )
+        if update_result.rowcount != 1:
+            raise RuntimeError(f"Project update failed for id={project.id}: rowcount={update_result.rowcount}")
         await db.commit()
-        await db.refresh(project)
+        video_update_applied = True
+        refreshed = await db.execute(select(Project).where(Project.id == project.id))
+        saved_project = refreshed.scalar_one()
 
         _start_conversion_background(
-            project_id=project.id,
+            project_id=saved_project.id,
             video_path=output_path,
-            project_dir=Path(settings.PROJECTS_ROOT_DIR) / str(project.id),
+            project_dir=Path(settings.PROJECTS_ROOT_DIR) / str(saved_project.id),
             output_width=settings.OUTPUT_WIDTH,
             inference_width=settings.INFERENCE_WIDTH,
         )
 
         return BrettzoneImportResponse(
-            project=ProjectResponse.model_validate(project),
+            project=ProjectResponse.model_validate(saved_project),
             fight_url=entry.fight_url,
             media_url=entry.media_url,
             camera=entry.camera,
@@ -104,12 +116,26 @@ async def import_brettzone_video(
         ) from exc
     except (URLError, HTTPError, OSError) as exc:
         await db.rollback()
+        if created_project_id is not None and not video_update_applied:
+            # Best-effort cleanup for imports that fail before video is attached to project.
+            try:
+                await db.execute(delete(Project).where(Project.id == created_project_id))
+                await db.commit()
+            except Exception:
+                await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to reach BrettZone. Please try again or use a direct URL.",
         ) from exc
     except Exception as exc:
         await db.rollback()
+        if created_project_id is not None and not video_update_applied:
+            # Best-effort cleanup for partial imports.
+            try:
+                await db.execute(delete(Project).where(Project.id == created_project_id))
+                await db.commit()
+            except Exception:
+                await db.rollback()
         logger.error("Failed to import BrettZone video: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
