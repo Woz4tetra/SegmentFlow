@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -197,12 +198,6 @@ def _extract_robot_names_from_html(html: str) -> list[str]:
 
 def _extract_robot_names_from_vs_text(html: str) -> list[tuple[str, str]]:
     """Extract robot names from page text patterns like 'Robot A vs Robot B'."""
-    # Remove tags and collapse whitespace for robust matching.
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = " ".join(text.split())
-    patterns = [
-        r"([A-Za-z0-9!'\-&\.\+ ]{2,50})\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,50})",
-    ]
     results: list[tuple[str, str]] = []
     disallowed = {
         "multi-camera",
@@ -213,18 +208,57 @@ def _extract_robot_names_from_vs_text(html: str) -> list[tuple[str, str]]:
         "camera",
         "download all",
     }
+
+    def add_pair(left_raw: str, right_raw: str) -> None:
+        left = _display_robot_name(left_raw)
+        right = _display_robot_name(right_raw)
+        if not left or not right:
+            return
+        if left.casefold() in disallowed or right.casefold() in disallowed:
+            return
+        if len(left) > 50 or len(right) > 50:
+            return
+        results.append((left, right))
+
+    # First pass: title/heading fields are the most reliable.
+    title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    if title_match:
+        _extract_vs_pairs_from_text(title_match.group(1), add_pair)
+
+    for heading in re.finditer(r"<h[1-3][^>]*>([^<]+)</h[1-3]>", html, flags=re.IGNORECASE):
+        _extract_vs_pairs_from_text(heading.group(1), add_pair)
+
+    # Second pass: flattened text catch-all.
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = " ".join(text.split())
+    _extract_vs_pairs_from_text(text, add_pair)
+
+    # Deduplicate while preserving order.
+    seen: set[tuple[str, str]] = set()
+    deduped: list[tuple[str, str]] = []
+    for pair in results:
+        key = (pair[0].casefold(), pair[1].casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(pair)
+    return deduped
+
+
+def _extract_vs_pairs_from_text(
+    text: str,
+    add_pair: Callable[[str, str], None],
+) -> None:
+    """Extract 'A vs B' pair(s) from text and pass them to add_pair."""
+    patterns = [
+        # Common title/header format: "A vs B - Multi-Camera"
+        r"([A-Za-z0-9!'\-&\.\+ ]{2,40}?)\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,40}?)(?=\s*-\s*|$)",
+        # Generic bounded pair in larger text.
+        r"([A-Za-z0-9!'\-&\.\+ ]{2,30}?)\s+vs\.?\s+([A-Za-z0-9!'\-&\.\+ ]{2,30}?)\b",
+    ]
     for pattern in patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            left = _display_robot_name(match.group(1))
-            right = _display_robot_name(match.group(2))
-            if not left or not right:
-                continue
-            if left.casefold() in disallowed or right.casefold() in disallowed:
-                continue
-            if len(left) > 50 or len(right) > 50:
-                continue
-            results.append((left, right))
-    return results
+            add_pair(match.group(1), match.group(2))
 
 
 def _extract_robot_thumbnails_from_html(html: str, base_url: str) -> dict[str, str]:
@@ -279,6 +313,20 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
         robot_names.add(name)
     for robot_name, image_url in _extract_robot_thumbnails_from_html(html, fight_url).items():
         robot_thumbnails.setdefault(robot_name, image_url)
+
+    # Some fights expose names only on the single-camera page.
+    if not robot_names and "fightReviewSync.php" in fight_url:
+        single_camera_url = fight_url.replace("fightReviewSync.php", "fightReview.php")
+        try:
+            single_html = fetch_html(single_camera_url, timeout=timeout)
+            for name in _extract_robot_names_from_html(single_html):
+                robot_names.add(name)
+            for robot_name, image_url in _extract_robot_thumbnails_from_html(
+                single_html, single_camera_url
+            ).items():
+                robot_thumbnails.setdefault(robot_name, image_url)
+        except (URLError, HTTPError, OSError):
+            pass
     robot_names_list = sorted(robot_names)
 
     for recording in recordings:

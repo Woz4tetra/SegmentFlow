@@ -150,6 +150,40 @@ def test_list_downloadables_extracts_vs_names_from_page_text(
     assert entries[0].robot_names == ["Eviscerator", "Injection!"]
 
 
+def test_list_downloadables_fallbacks_to_single_camera_page_for_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If sync page lacks names, fallback to fightReview page should populate them."""
+    sync_html = """
+    <script>
+      window.MATCH_DATA = {
+        recordings: [
+          {"proxy720":"https://cdn.example.com/a.mp4","camera":"Cage 4 Blue High","category":"other"}
+        ],
+        gameID: "123"
+      };
+    </script>
+    """
+    single_html = """
+    <html>
+      <head><title>Paradox vs Buzzzz-Kill - Fight Review</title></head>
+      <body><h1>Paradox vs Buzzzz-Kill</h1></body>
+    </html>
+    """
+
+    def fake_fetch_html(url: str, timeout: float = 20.0) -> str:
+        if "fightReviewSync.php" in url:
+            return sync_html
+        if "fightReview.php" in url:
+            return single_html
+        return ""
+
+    monkeypatch.setattr("app.core.brettzone.fetch_html", fake_fetch_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+    assert len(entries) == 1
+    assert entries[0].robot_names == ["Buzzzz-Kill", "Paradox"]
+
+
 def test_list_downloadables_extracts_robot_thumbnails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Robot thumbnail URLs are extracted from BrettZone metadata."""
     sample_html = """
