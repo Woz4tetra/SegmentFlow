@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import cv2
 import numpy as np
@@ -312,6 +312,7 @@ async def _ensure_robot_labels_for_project(
             thumbnail_url = thumbnail_by_name.get(compare_key)
             dominant_color_hex = "#2563eb"
             thumbnail_image: np.ndarray | None = None
+            thumbnail_path: str | None = None
             if thumbnail_url:
                 try:
                     thumbnail_image = await asyncio.to_thread(_download_thumbnail_image, thumbnail_url)
@@ -324,30 +325,32 @@ async def _ensure_robot_labels_for_project(
                     )
             if thumbnail_image is not None:
                 dominant_color_hex = _dominant_color_hex_from_image(thumbnail_image)
-
-            existing_label = Label(
-                name=robot_display_name,
-                color_hex=dominant_color_hex,
-                thumbnail_path=None,
-            )
-            db.add(existing_label)
-            await db.flush()
-            if thumbnail_image is not None:
                 try:
+                    # Pre-generate ID so thumbnail path can be set before first DB flush.
+                    precreated_label_id = uuid4()
                     thumbnail_path = await asyncio.to_thread(
                         _save_label_thumbnail_image,
-                        existing_label.id,
+                        precreated_label_id,
                         thumbnail_image,
                     )
-                    if thumbnail_path:
-                        existing_label.thumbnail_path = thumbnail_path
-                        db.add(existing_label)
                 except Exception as exc:
                     logger.warning(
                         "Failed to persist robot thumbnail for %s: %s",
                         robot_display_name,
                         exc,
                     )
+                    precreated_label_id = uuid4()
+            else:
+                precreated_label_id = uuid4()
+
+            existing_label = Label(
+                id=precreated_label_id,
+                name=robot_display_name,
+                color_hex=dominant_color_hex,
+                thumbnail_path=thumbnail_path,
+            )
+            db.add(existing_label)
+            await db.flush()
             label_by_name[compare_key] = existing_label
             logger.info("Created label from BrettZone robot name: %s", robot_display_name)
         project_label_ids.append(existing_label.id)
