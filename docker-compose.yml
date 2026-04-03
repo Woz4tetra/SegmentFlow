@@ -50,7 +50,6 @@ services:
     volumes:
       - ./backend:/app
       - /media/storage/segmentflow-data/projects:/app/data/projects
-      - /media/storage/segmentflow.db:/app/segmentflow.db
       # Cache SAM3 model from Hugging Face (mount local cache)
       - /media/storage/segmentflow-data/models:/root/.cache/huggingface/hub
       # Cache PyTorch models
