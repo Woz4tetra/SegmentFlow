@@ -4,6 +4,7 @@ from .complete_video_upload import complete_video_upload
 from .create_project import create_project
 from .delete_project import delete_project
 from .export_segmask import export_segmask
+from .export_yolo_seg import export_yolo_seg
 from .export_yolo import export_yolo
 from .get_conversion_progress import get_conversion_progress
 from .get_frame_image import get_frame_image
@@ -36,6 +37,7 @@ __all__ = [
     "create_project",
     "delete_project",
     "export_segmask",
+    "export_yolo_seg",
     "export_yolo",
     "get_conversion_progress",
     "get_frame_image",
