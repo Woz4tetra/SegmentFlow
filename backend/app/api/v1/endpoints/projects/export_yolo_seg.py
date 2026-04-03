@@ -1,0 +1,250 @@
+"""Export images and labels in YOLO segmentation format as a ZIP archive."""
+
+import asyncio
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+from uuid import UUID
+
+import cv2
+import numpy as np
+from fastapi import Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
+
+from app.core.config import settings
+from app.core.contour_utils import parse_contour_polygon
+from app.core.database import get_db
+from app.core.logging import get_logger
+from app.core.trim_utils import get_trim_frame_bounds
+from app.models.image import Image, ValidationStatus
+from app.models.label import Label
+from app.models.mask import Mask
+from app.models.project import Project
+
+from .shared_objects import router
+
+logger = get_logger(__name__)
+
+
+def _cleanup_export(path: Path) -> None:
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        logger.warning("Failed to cleanup export directory: %s", path)
+
+
+def _iter_outer_contours(
+    contour_polygon: object,
+    scale_x: float,
+    scale_y: float,
+) -> list[np.ndarray]:
+    contours, hierarchy = parse_contour_polygon(contour_polygon)
+    if not contours:
+        return []
+
+    if scale_x != 1.0 or scale_y != 1.0:
+        scaled: list[np.ndarray] = []
+        for contour in contours:
+            float_contour = contour.astype(np.float64)
+            float_contour[:, :, 0] *= scale_x
+            float_contour[:, :, 1] *= scale_y
+            scaled.append(float_contour.astype(np.int32))
+        contours = scaled
+
+    if hierarchy is None:
+        return contours
+
+    # Keep only top-level contours (parent == -1) to avoid writing holes as instances.
+    outer: list[np.ndarray] = []
+    for idx, contour in enumerate(contours):
+        if hierarchy[0][idx][3] == -1:
+            outer.append(contour)
+    return outer
+
+
+def _contour_to_yolo_seg_line(
+    contour: np.ndarray,
+    class_id: int,
+    width: int,
+    height: int,
+) -> str | None:
+    pts = contour.reshape(-1, 2).astype(np.float64)
+    if pts.shape[0] < 3:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+
+    # Clamp to image bounds then normalize to [0, 1].
+    pts[:, 0] = np.clip(pts[:, 0], 0.0, float(width - 1))
+    pts[:, 1] = np.clip(pts[:, 1], 0.0, float(height - 1))
+    pts[:, 0] = pts[:, 0] / float(width)
+    pts[:, 1] = pts[:, 1] / float(height)
+
+    coords = " ".join(f"{x:.6f} {y:.6f}" for x, y in pts)
+    return f"{class_id} {coords}"
+
+
+def _build_yolo_seg_zip(
+    project_name: str,
+    images: list[Image],
+    labels: list[Label],
+    label_index: dict[UUID, int],
+    masks_by_image: dict[UUID, dict[UUID, Mask]],
+    skip_n: int,
+) -> tuple[Path, Path]:
+    export_dir = Path(tempfile.mkdtemp(prefix="segmentflow_yolo_seg_"))
+    images_dir = export_dir / "images"
+    labels_dir = export_dir / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    data_path = export_dir / "data.yml"
+    data_lines = [
+        "names:",
+        *[f"- {label.name}" for label in labels],
+        "colors:",
+        *[f"- \"{label.color_hex}\"" for label in labels],
+        f"nc: {len(labels)}",
+        "test: ../test/images",
+        "train: ../train/images",
+        "val: ../val/images",
+    ]
+    data_path.write_text("\n".join(data_lines), encoding="utf-8")
+
+    for idx, image in enumerate(images):
+        if skip_n > 1 and idx % skip_n != 0:
+            continue
+        if image.validation != ValidationStatus.PASSED.value and not image.manually_labeled:
+            continue
+
+        image_rel = image.output_path or image.inference_path
+        if not image_rel:
+            continue
+
+        image_path = Path(settings.PROJECTS_ROOT_DIR) / image_rel
+        if not image_path.exists():
+            logger.warning("Missing image file for YOLO-seg export: %s", image_path)
+            continue
+
+        img = cv2.imread(str(image_path))
+        if img is None:
+            logger.warning("Failed to read image for YOLO-seg export: %s", image_path)
+            continue
+        height, width = img.shape[:2]
+        if width == 0 or height == 0:
+            continue
+
+        infer_width = width
+        infer_height = height
+        if image.output_path and image.inference_path:
+            infer_path = Path(settings.PROJECTS_ROOT_DIR) / image.inference_path
+            if infer_path.exists():
+                infer_img = cv2.imread(str(infer_path))
+                if infer_img is None:
+                    logger.warning("Failed to read inference image: %s", infer_path)
+                else:
+                    infer_height, infer_width = infer_img.shape[:2]
+        scale_x = width / infer_width if infer_width else 1.0
+        scale_y = height / infer_height if infer_height else 1.0
+
+        out_image_path = images_dir / image_path.name
+        shutil.copyfile(image_path, out_image_path)
+
+        label_lines: list[str] = []
+        by_label = masks_by_image.get(image.id, {})
+        for label_id, mask in by_label.items():
+            class_id = label_index.get(label_id)
+            if class_id is None:
+                continue
+            outer_contours = _iter_outer_contours(mask.contour_polygon, scale_x, scale_y)
+            for contour in outer_contours:
+                line = _contour_to_yolo_seg_line(contour, class_id, width, height)
+                if line:
+                    label_lines.append(line)
+
+        label_path = labels_dir / f"{image_path.stem}.txt"
+        label_path.write_text("\n".join(label_lines), encoding="utf-8")
+
+    zip_path = export_dir / f"{project_name}_yolo_seg.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for path in export_dir.rglob("*"):
+            if path == zip_path:
+                continue
+            zipf.write(path, path.relative_to(export_dir))
+    return zip_path, export_dir
+
+
+@router.get("/projects/{project_id}/export/yolo-seg")
+async def export_yolo_seg(
+    project_id: UUID,
+    skip_n: int = Query(1, ge=1, description="Skip every Nth frame in export"),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """Export project images and YOLO-seg labels as a ZIP."""
+    try:
+        project_result = await db.execute(select(Project).where(Project.id == project_id))
+        project = project_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found",
+            )
+
+        bounds = get_trim_frame_bounds(project)
+        images_query = select(Image).where(Image.project_id == project_id)
+        if bounds:
+            start_frame, end_frame = bounds
+            images_query = images_query.where(
+                Image.frame_number >= start_frame,
+                Image.frame_number <= end_frame,
+            )
+        images_result = await db.execute(images_query.order_by(Image.frame_number))
+        images = list(images_result.scalars().all())
+        if not images:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No images available for export in the current trim range",
+            )
+
+        labels_result = await db.execute(select(Label).order_by(Label.name))
+        labels = list(labels_result.scalars().all())
+        label_index = {label.id: idx for idx, label in enumerate(labels)}
+
+        image_ids = [img.id for img in images]
+        masks_result = await db.execute(select(Mask).where(Mask.image_id.in_(image_ids)))
+        masks = list(masks_result.scalars().all())
+
+        masks_by_image: dict[UUID, dict[UUID, Mask]] = {}
+        for mask in masks:
+            by_label = masks_by_image.setdefault(mask.image_id, {})
+            existing = by_label.get(mask.label_id)
+            if not existing or mask.area > existing.area:
+                by_label[mask.label_id] = mask
+
+        zip_path, export_dir = await asyncio.to_thread(
+            _build_yolo_seg_zip,
+            project.name,
+            images,
+            labels,
+            label_index,
+            masks_by_image,
+            skip_n,
+        )
+        return FileResponse(
+            str(zip_path),
+            media_type="application/zip",
+            filename=zip_path.name,
+            background=BackgroundTask(_cleanup_export, export_dir),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to export YOLO-seg ZIP: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to export YOLO-seg ZIP",
+        ) from e
