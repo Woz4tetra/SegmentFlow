@@ -358,6 +358,14 @@ interface FrameStatusData {
   has_mask: boolean;
 }
 
+interface ValidationRangeUpdateResponse {
+  validation: 'not_validated' | 'passed' | 'failed';
+  updated_frame_numbers: number[];
+  updated_count: number;
+  start_frame: number;
+  end_frame: number;
+}
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -525,13 +533,18 @@ async function setValidationStatus(status: 'passed' | 'failed'): Promise<void> {
   if (!currentImage.value || validationBusy.value) return;
   validationBusy.value = true;
   try {
-    const { data } = await api.patch<{ images: ImageData[]; total: number }>(
-      `/projects/${projectId}/frames/${currentFrameNumber.value}/validation`,
+    const { data } = await api.patch<ValidationRangeUpdateResponse>(
+      `/projects/${projectId}/frames/${currentFrameNumber.value}/validation/range`,
       { validation: status },
     );
-    images.value = data.images || [];
-    totalFrames.value = data.total || images.value.length;
-    fetchMaskStatus();
+    if (data?.updated_frame_numbers?.length) {
+      const updated = new Set<number>(data.updated_frame_numbers);
+      for (const image of images.value) {
+        if (updated.has(image.frame_number) && !image.manually_labeled) {
+          image.validation = status;
+        }
+      }
+    }
   } catch (error) {
     console.error('Failed to update validation status:', error);
   } finally {

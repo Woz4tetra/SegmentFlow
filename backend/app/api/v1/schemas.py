@@ -384,6 +384,19 @@ class ImageValidationUpdate(BaseModel):
         return v
 
 
+class ImageValidationRangeResponse(BaseModel):
+    """Schema for range-based validation updates."""
+
+    validation: str = Field(..., description="Validation status applied to frames")
+    updated_frame_numbers: list[int] = Field(
+        default_factory=list,
+        description="Frame numbers that were updated",
+    )
+    updated_count: int = Field(..., ge=0, description="Number of updated frames")
+    start_frame: int = Field(..., ge=0, description="Start frame of computed update range")
+    end_frame: int = Field(..., ge=0, description="End frame of computed update range")
+
+
 class FrameStatus(BaseModel):
     """Schema for per-frame status used in aggregates."""
 
