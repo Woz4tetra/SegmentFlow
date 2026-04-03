@@ -92,24 +92,95 @@
           <div v-if="labelSettingsLoading" class="loading">Loading labels…</div>
           <div v-else-if="labelSettings.length === 0" class="label-settings__empty">
             <p>No labels yet.</p>
-            <p class="hint">Create labels in the Labels page first.</p>
+            <p class="hint-muted">Create labels in the Labels page first.</p>
           </div>
-          <div v-else class="label-settings__list">
-            <label v-for="label in labelSettings" :key="label.id" class="label-toggle">
-              <span class="label-info">
-                <span class="label-dot" :style="{ backgroundColor: label.color_hex }"></span>
-                <span class="label-name">{{ label.name }}</span>
-              </span>
-              <span class="toggle">
-                <input
-                  type="checkbox"
-                  :checked="label.enabled"
-                  @change="onLabelToggle(label, $event)"
-                />
-                <span class="toggle-track"></span>
-                <span class="toggle-thumb"></span>
-              </span>
-            </label>
+          <div v-else class="label-settings__content">
+            <div class="label-tools">
+              <input
+                v-model="labelSearch"
+                class="label-search"
+                type="text"
+                placeholder="Search labels..."
+              />
+              <div class="label-filter-row">
+                <button
+                  v-for="option in filterOptions"
+                  :key="option.value"
+                  class="filter-chip"
+                  :class="{ active: labelFilter === option.value }"
+                  type="button"
+                  @click="labelFilter = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <div class="label-summary">
+                <span>{{ enabledCount }} enabled / {{ labelSettings.length }} total</span>
+                <span v-if="filteredLabelSettings.length !== labelSettings.length">
+                  (showing {{ filteredLabelSettings.length }})
+                </span>
+              </div>
+              <div class="label-bulk-actions">
+                <button
+                  class="bulk-btn"
+                  type="button"
+                  :disabled="bulkBusy || filteredLabelSettings.length === 0"
+                  @click="applyBulkToVisible(true)"
+                >
+                  Enable visible
+                </button>
+                <button
+                  class="bulk-btn"
+                  type="button"
+                  :disabled="bulkBusy || filteredLabelSettings.length === 0"
+                  @click="applyBulkToVisible(false)"
+                >
+                  Disable visible
+                </button>
+              </div>
+            </div>
+
+            <p v-if="patchError" class="label-error">{{ patchError }}</p>
+            <div v-if="filteredLabelSettings.length === 0" class="label-settings__empty">
+              <p>No matching labels.</p>
+              <p class="hint-muted">Try a different search or filter.</p>
+            </div>
+            <div v-else class="label-grid">
+              <article
+                v-for="label in filteredLabelSettings"
+                :key="label.id"
+                class="label-card"
+                :class="{ 'is-enabled': label.enabled }"
+              >
+                <div class="label-card__thumb" :style="{ borderColor: label.color_hex }">
+                  <img
+                    v-if="label.thumbnail_path && !brokenThumbnailIds[label.id]"
+                    :src="thumbnailSrc(label.thumbnail_path)"
+                    :alt="`${label.name} thumbnail`"
+                    @error="onThumbnailError(label.id)"
+                  />
+                  <div v-else class="label-card__fallback" :style="{ backgroundColor: `${label.color_hex}22` }">
+                    <span :style="{ color: label.color_hex }">{{ label.name.slice(0, 1).toUpperCase() }}</span>
+                  </div>
+                </div>
+                <div class="label-card__body">
+                  <div class="label-info">
+                    <span class="label-dot" :style="{ backgroundColor: label.color_hex }"></span>
+                    <span class="label-name" :title="label.name">{{ label.name }}</span>
+                  </div>
+                  <label class="toggle" :class="{ disabled: isLabelUpdating(label.id) || bulkBusy }">
+                    <input
+                      type="checkbox"
+                      :checked="label.enabled"
+                      :disabled="isLabelUpdating(label.id) || bulkBusy"
+                      @change="onLabelToggle(label, $event)"
+                    />
+                    <span class="toggle-track"></span>
+                    <span class="toggle-thumb"></span>
+                  </label>
+                </div>
+              </article>
+            </div>
           </div>
         </div>
       </aside>
@@ -121,7 +192,7 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, resolveApiAssetUrl } from '../lib/api';
 import DualRangeSlider from '../components/DualRangeSlider.vue';
 import StageNavigation from '../components/StageNavigation.vue';
 
@@ -151,6 +222,8 @@ interface LabelSetting {
   enabled: boolean;
 }
 
+type LabelFilter = 'all' | 'enabled' | 'disabled' | 'thumbnail';
+
 const route = useRoute();
 const router = useRouter();
 const projectId = String(route.params.id ?? '');
@@ -172,10 +245,42 @@ const conversionInProgress = ref(false);
 let conversionPollInterval: number | null = null;
 const labelSettings = ref<LabelSetting[]>([]);
 const labelSettingsLoading = ref(false);
+const labelSearch = ref('');
+const labelFilter = ref<LabelFilter>('all');
+const patchError = ref('');
+const bulkBusy = ref(false);
+const labelPatchInFlight = ref<Record<string, boolean>>({});
+const brokenThumbnailIds = ref<Record<string, boolean>>({});
+const filterOptions: Array<{ value: LabelFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'enabled', label: 'Enabled' },
+  { value: 'disabled', label: 'Disabled' },
+  { value: 'thumbnail', label: 'Has thumbnail' },
+];
 
 const conversionPercent = computed(() => {
   if (conversionTotal.value === 0) return 0;
   return Math.round((conversionSaved.value / conversionTotal.value) * 100);
+});
+
+const enabledCount = computed(() => labelSettings.value.filter(label => label.enabled).length);
+const filteredLabelSettings = computed(() => {
+  const search = labelSearch.value.trim().toLowerCase();
+  return labelSettings.value.filter((label) => {
+    if (search && !label.name.toLowerCase().includes(search)) {
+      return false;
+    }
+    if (labelFilter.value === 'enabled' && !label.enabled) {
+      return false;
+    }
+    if (labelFilter.value === 'disabled' && label.enabled) {
+      return false;
+    }
+    if (labelFilter.value === 'thumbnail' && !label.thumbnail_path) {
+      return false;
+    }
+    return true;
+  });
 });
 
 function formatTime(sec: number): string {
@@ -274,6 +379,7 @@ async function fetchLabelSettings(): Promise<void> {
   try {
     const { data } = await api.get<LabelSetting[]>(`/projects/${projectId}/label_settings`);
     labelSettings.value = data || [];
+    patchError.value = '';
   } catch (error) {
     console.error('Failed to load label settings:', error);
     labelSettings.value = [];
@@ -282,12 +388,35 @@ async function fetchLabelSettings(): Promise<void> {
   }
 }
 
-async function onLabelToggle(label: LabelSetting, event: Event): Promise<void> {
-  const target = event.target as HTMLInputElement | null;
-  if (!target) return;
-  const nextEnabled = target.checked;
+function setLabelUpdating(labelId: string, updating: boolean): void {
+  labelPatchInFlight.value = {
+    ...labelPatchInFlight.value,
+    [labelId]: updating,
+  };
+}
+
+function isLabelUpdating(labelId: string): boolean {
+  return Boolean(labelPatchInFlight.value[labelId]);
+}
+
+function thumbnailSrc(path: string): string {
+  const base = resolveApiAssetUrl(path);
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}t=${Date.now()}`;
+}
+
+function onThumbnailError(labelId: string): void {
+  brokenThumbnailIds.value = {
+    ...brokenThumbnailIds.value,
+    [labelId]: true,
+  };
+}
+
+async function updateLabelEnabled(label: LabelSetting, nextEnabled: boolean, showError = true): Promise<boolean> {
+  if (isLabelUpdating(label.id)) return false;
   const previous = label.enabled;
   label.enabled = nextEnabled;
+  setLabelUpdating(label.id, true);
   try {
     const { data } = await api.patch<LabelSetting>(
       `/projects/${projectId}/label_settings/${label.id}`,
@@ -296,9 +425,62 @@ async function onLabelToggle(label: LabelSetting, event: Event): Promise<void> {
     if (data) {
       label.enabled = data.enabled;
     }
+    return true;
   } catch (error) {
     label.enabled = previous;
+    if (showError) {
+      patchError.value = 'Failed to update one or more labels. Please try again.';
+    }
     console.error('Failed to update label setting:', error);
+    return false;
+  } finally {
+    setLabelUpdating(label.id, false);
+  }
+}
+
+async function onLabelToggle(label: LabelSetting, event: Event): Promise<void> {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+  patchError.value = '';
+  await updateLabelEnabled(label, target.checked);
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  maxConcurrent: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.max(1, maxConcurrent) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) return;
+      await task(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function applyBulkToVisible(enabled: boolean): Promise<void> {
+  if (bulkBusy.value) return;
+  patchError.value = '';
+  const candidates = filteredLabelSettings.value.filter(
+    (label) => label.enabled !== enabled && !isLabelUpdating(label.id),
+  );
+  if (candidates.length === 0) return;
+
+  bulkBusy.value = true;
+  let failed = 0;
+  await runWithConcurrency(candidates, 4, async (label) => {
+    const ok = await updateLabelEnabled(label, enabled, false);
+    if (!ok) {
+      failed += 1;
+    }
+  });
+  bulkBusy.value = false;
+
+  if (failed > 0) {
+    patchError.value = `Failed to update ${failed} label${failed === 1 ? '' : 's'}.`;
   }
 }
 
@@ -449,30 +631,152 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   font-size: 0.9rem;
 }
 
-.label-settings__list {
+.label-settings__content {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
-.label-toggle {
+.label-tools {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.75rem;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.label-search {
+  width: 100%;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.label-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-chip {
+  border: 1px solid var(--border, #dfe3ec);
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.label-summary {
+  color: var(--muted, #4b5563);
+  font-size: 0.82rem;
+}
+
+.label-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.bulk-btn {
+  border: 1px solid var(--border, #dfe3ec);
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  border-radius: 10px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.bulk-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.label-error {
+  color: #b91c1c;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  max-height: min(58vh, 620px);
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+
+.label-card {
   border: 1px solid var(--border, #dfe3ec);
   border-radius: 12px;
   background: var(--surface-elevated, var(--surface, #ffffff));
-  cursor: pointer;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.label-card.is-enabled {
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15) inset;
+}
+
+.label-card__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-muted, #eef2f7);
+}
+
+.label-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.label-card__fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.label-card__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
 }
 
 .label-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 600;
+  gap: 0.4rem;
+  font-weight: 550;
   color: var(--text, #0f172a);
+  min-width: 0;
+}
+
+.label-name {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
 }
 
 .label-dot {
@@ -487,6 +791,11 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   width: 44px;
   height: 24px;
   flex-shrink: 0;
+}
+
+.toggle.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .toggle input {
@@ -530,6 +839,28 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   }
   .trim-sidebar {
     position: static;
+  }
+  .label-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-height: none;
+  }
+}
+
+.hint-muted {
+  color: var(--muted, #6b7280);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .label-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .label-grid {
+    grid-template-columns: 1fr;
   }
 }
 
