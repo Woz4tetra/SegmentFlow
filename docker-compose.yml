@@ -49,8 +49,9 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - /media/storage/segmentflow-data/projects:/app/data/projects
       # Cache SAM3 model from Hugging Face (mount local cache)
-      - ./backend/data/models:/root/.cache/huggingface/hub
+      - /media/storage/segmentflow-data/models:/root/.cache/huggingface/hub
       # Cache PyTorch models
       - ./data/torch_cache:/root/.cache/torch
     networks:
