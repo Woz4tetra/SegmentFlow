@@ -29,8 +29,7 @@ DEFAULT_SOURCE_PAGES = [
     "https://brettzone.net/",
     "https://www.brettzone.net/",
 ]
-PROGRAM_FEED_RE = re.compile(r"program[\s\-_]*feed", re.IGNORECASE)
-HOST_CAMERA_RE = re.compile(r"\bhost\b", re.IGNORECASE)
+CAGE_CAMERA_RE = re.compile(r"(?:cage|mobile(?:[\s\-_]*cam)?|sky[\s\-_]*cam)", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -165,8 +164,8 @@ def _extract_mp4_urls(html: str) -> list[str]:
     return sorted(set(normalized))
 
 
-def _is_program_feed(camera: str) -> bool:
-    return bool(PROGRAM_FEED_RE.search(camera) or HOST_CAMERA_RE.search(camera))
+def _is_cage_camera_feed(camera: str) -> bool:
+    return bool(CAGE_CAMERA_RE.search(camera))
 
 
 def _normalize_robot_name_for_compare(name: str) -> str:
@@ -446,7 +445,7 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
         if not isinstance(media_url, str) or not media_url:
             continue
         camera = str(recording.get("camera") or "")
-        if _is_program_feed(camera):
+        if not _is_cage_camera_feed(camera):
             continue
         entries.append(
             BrettzoneEntry(
