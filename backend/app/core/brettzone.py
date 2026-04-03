@@ -30,6 +30,7 @@ DEFAULT_SOURCE_PAGES = [
     "https://www.brettzone.net/",
 ]
 PROGRAM_FEED_RE = re.compile(r"program[\s\-_]*feed", re.IGNORECASE)
+HOST_CAMERA_RE = re.compile(r"\bhost\b", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -165,7 +166,7 @@ def _extract_mp4_urls(html: str) -> list[str]:
 
 
 def _is_program_feed(camera: str) -> bool:
-    return bool(PROGRAM_FEED_RE.search(camera))
+    return bool(PROGRAM_FEED_RE.search(camera) or HOST_CAMERA_RE.search(camera))
 
 
 def _normalize_robot_name_for_compare(name: str) -> str:
