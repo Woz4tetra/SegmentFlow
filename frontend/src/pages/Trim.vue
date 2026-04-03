@@ -591,7 +591,12 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .lede { margin: 0 0 0.75rem; color: var(--muted, #4b5563); line-height: 1.6; }
 
 .content { width: calc(100% - 2.5rem); max-width: 2100px; margin: 0 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-.trim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 1rem; align-items: start; }
+.trim-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 26vw);
+  gap: 1rem;
+  align-items: start;
+}
 .trim-card { width: 100%; border: 1px solid var(--border, #dfe3ec); border-radius: 16px; padding: 1.5rem; background: var(--surface, #ffffff); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
 .trim-sidebar { position: sticky; top: 1rem; }
 .preview-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
@@ -618,6 +623,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 340px;
 }
 
 .label-settings__header h3 {
@@ -708,20 +714,20 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .label-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
+  gap: 0.65rem;
   max-height: min(58vh, 620px);
   overflow: auto;
-  padding-right: 0.1rem;
+  padding-right: 0.25rem;
 }
 
 .label-card {
   border: 1px solid var(--border, #dfe3ec);
   border-radius: 12px;
   background: var(--surface-elevated, var(--surface, #ffffff));
-  padding: 0.45rem;
+  padding: 0.55rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .label-card.is-enabled {
@@ -731,7 +737,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 
 .label-card__thumb {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 4 / 3;
   border: 2px solid transparent;
   border-radius: 10px;
   overflow: hidden;
@@ -776,7 +782,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.78rem;
+  font-size: 0.84rem;
 }
 
 .label-dot {
@@ -841,8 +847,11 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
     position: static;
   }
   .label-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     max-height: none;
+  }
+  .label-settings {
+    min-width: 0;
   }
 }
 
@@ -854,7 +863,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 
 @media (max-width: 680px) {
   .label-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
