@@ -74,20 +74,12 @@ async def _compute_and_apply_validation_range_compact(
         end_index = current_index
     else:
         start_index = current_index
-        if last_manual_index is not None:
-            max_end_frame = (
-                rows[last_manual_index].frame_number
-                + settings.MAX_PROPAGATION_LENGTH
-            )
-        else:
-            max_end_frame = rows[current_index].frame_number + settings.MAX_PROPAGATION_LENGTH
-
         next_manual_frame = (
             rows[next_manual_index].frame_number
             if next_manual_index is not None
-            else max_end_frame
+            else rows[-1].frame_number
         )
-        end_frame = min(next_manual_frame, max_end_frame)
+        end_frame = next_manual_frame
         end_index = current_index
         for idx in range(current_index, len(rows)):
             if rows[idx].frame_number <= end_frame:
@@ -169,20 +161,12 @@ async def _compute_and_apply_validation_range(
         end_index = current_index
     else:
         start_index = current_index
-        if last_manual_index is not None:
-            max_end_frame = (
-                images[last_manual_index].frame_number
-                + settings.MAX_PROPAGATION_LENGTH
-            )
-        else:
-            max_end_frame = images[current_index].frame_number + settings.MAX_PROPAGATION_LENGTH
-
         next_manual_frame = (
             images[next_manual_index].frame_number
             if next_manual_index is not None
-            else max_end_frame
+            else images[-1].frame_number
         )
-        end_frame = min(next_manual_frame, max_end_frame)
+        end_frame = next_manual_frame
         end_index = current_index
         for idx in range(current_index, len(images)):
             if images[idx].frame_number <= end_frame:
