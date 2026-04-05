@@ -120,24 +120,6 @@
                   (showing {{ filteredLabelSettings.length }})
                 </span>
               </div>
-              <div class="label-bulk-actions">
-                <button
-                  class="bulk-btn"
-                  type="button"
-                  :disabled="bulkBusy || filteredLabelSettings.length === 0"
-                  @click="applyBulkToVisible(true)"
-                >
-                  Enable visible
-                </button>
-                <button
-                  class="bulk-btn"
-                  type="button"
-                  :disabled="bulkBusy || filteredLabelSettings.length === 0"
-                  @click="applyBulkToVisible(false)"
-                >
-                  Disable visible
-                </button>
-              </div>
             </div>
 
             <p v-if="patchError" class="label-error">{{ patchError }}</p>
@@ -168,11 +150,11 @@
                     <span class="label-dot" :style="{ backgroundColor: label.color_hex }"></span>
                     <span class="label-name" :title="label.name">{{ label.name }}</span>
                   </div>
-                  <label class="toggle" :class="{ disabled: isLabelUpdating(label.id) || bulkBusy }">
+                  <label class="toggle" :class="{ disabled: isLabelUpdating(label.id) }">
                     <input
                       type="checkbox"
                       :checked="label.enabled"
-                      :disabled="isLabelUpdating(label.id) || bulkBusy"
+                      :disabled="isLabelUpdating(label.id)"
                       @change="onLabelToggle(label, $event)"
                     />
                     <span class="toggle-track"></span>
@@ -248,7 +230,6 @@ const labelSettingsLoading = ref(false);
 const labelSearch = ref('');
 const labelFilter = ref<LabelFilter>('all');
 const patchError = ref('');
-const bulkBusy = ref(false);
 const labelPatchInFlight = ref<Record<string, boolean>>({});
 const brokenThumbnailIds = ref<Record<string, boolean>>({});
 const filterOptions: Array<{ value: LabelFilter; label: string }> = [
@@ -443,45 +424,6 @@ async function onLabelToggle(label: LabelSetting, event: Event): Promise<void> {
   if (!target) return;
   patchError.value = '';
   await updateLabelEnabled(label, target.checked);
-}
-
-async function runWithConcurrency<T>(
-  items: T[],
-  maxConcurrent: number,
-  task: (item: T) => Promise<void>,
-): Promise<void> {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.max(1, maxConcurrent) }, async () => {
-    while (queue.length > 0) {
-      const item = queue.shift();
-      if (!item) return;
-      await task(item);
-    }
-  });
-  await Promise.all(workers);
-}
-
-async function applyBulkToVisible(enabled: boolean): Promise<void> {
-  if (bulkBusy.value) return;
-  patchError.value = '';
-  const candidates = filteredLabelSettings.value.filter(
-    (label) => label.enabled !== enabled && !isLabelUpdating(label.id),
-  );
-  if (candidates.length === 0) return;
-
-  bulkBusy.value = true;
-  let failed = 0;
-  await runWithConcurrency(candidates, 4, async (label) => {
-    const ok = await updateLabelEnabled(label, enabled, false);
-    if (!ok) {
-      failed += 1;
-    }
-  });
-  bulkBusy.value = false;
-
-  if (failed > 0) {
-    patchError.value = `Failed to update ${failed} label${failed === 1 ? '' : 's'}.`;
-  }
 }
 
 async function checkConversionProgress(): Promise<boolean> {
@@ -682,27 +624,6 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .label-summary {
   color: var(--muted, #4b5563);
   font-size: 0.82rem;
-}
-
-.label-bulk-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.bulk-btn {
-  border: 1px solid var(--border, #dfe3ec);
-  background: var(--surface, #fff);
-  color: var(--text, #0f172a);
-  border-radius: 10px;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.bulk-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .label-error {
