@@ -29,7 +29,7 @@ projects_root_dir = "./data/projects"
 
 [processing]
 # Maximum number of frames to propagate in one batch
-max_propagation_length = 1000
+max_propagation_length = 100000
 
 # Width for SAM inference images (smaller = faster, less memory)
 inference_width = 1024
