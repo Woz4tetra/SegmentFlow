@@ -6,7 +6,6 @@ from .delete_project import delete_project
 from .export_segmask import export_segmask
 from .export_yolo_seg import export_yolo_seg
 from .export_yolo import export_yolo
-from .get_frame_index import get_frame_index
 from .get_conversion_progress import get_conversion_progress
 from .get_frame_image import get_frame_image
 from .get_frame_statuses import get_frame_statuses
@@ -40,7 +39,6 @@ __all__ = [
     "export_segmask",
     "export_yolo_seg",
     "export_yolo",
-    "get_frame_index",
     "get_conversion_progress",
     "get_frame_image",
     "get_frame_statuses",
