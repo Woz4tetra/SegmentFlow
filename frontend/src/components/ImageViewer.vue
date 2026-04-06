@@ -30,7 +30,7 @@
       class="mode-indicator"
       :class="{ exclude: !includeMode }"
       title="Click to toggle include/exclude"
-      @click="toggleIncludeMode"
+      @click.stop.prevent="toggleIncludeMode"
     >
       {{ includeMode ? '+ Include' : '− Exclude' }}
     </div>
@@ -1550,7 +1550,9 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
   font-weight: 600;
   border-radius: 6px;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
   transition: background 0.2s ease;
 }
 
