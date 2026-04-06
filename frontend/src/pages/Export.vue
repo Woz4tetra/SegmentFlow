@@ -86,7 +86,6 @@ const route = useRoute();
 const projectId = String(route.params.id ?? '');
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 20000,
 });
 
 const loading = ref(true);
