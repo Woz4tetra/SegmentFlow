@@ -1,5 +1,6 @@
 """Export images and semantic segmentation masks as a ZIP archive."""
 
+import asyncio
 import shutil
 import tempfile
 import zipfile
@@ -34,6 +35,88 @@ def _cleanup_export(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
     except OSError:
         logger.warning("Failed to cleanup export directory: %s", path)
+
+
+def _build_segmask_zip(
+    project_name: str,
+    images: list[Image],
+    labels: list[Label],
+    label_index: dict[UUID, int],
+    masks_by_image: dict[UUID, dict[UUID, Mask]],
+    skip_n: int,
+) -> tuple[Path, Path]:
+    """Build segmentation mask export zip on a worker thread."""
+    export_dir = Path(tempfile.mkdtemp(prefix="segmentflow_segmask_"))
+    out_dir = export_dir / "segmask"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    classes_path = out_dir / "classes.txt"
+    class_lines = [f"{idx + 1}: {label.name}" for idx, label in enumerate(labels)]
+    classes_path.write_text("\n".join(class_lines), encoding="utf-8")
+
+    for idx, image in enumerate(images):
+        if skip_n > 1 and idx % skip_n != 0:
+            continue
+        if image.validation != ValidationStatus.PASSED.value and not image.manually_labeled:
+            continue
+        image_rel = image.output_path or image.inference_path
+        if not image_rel:
+            continue
+
+        image_path = Path(settings.PROJECTS_ROOT_DIR) / image_rel
+        if not image_path.exists():
+            logger.warning("Missing image file for export: %s", image_path)
+            continue
+
+        img = cv2.imread(str(image_path))
+        if img is None:
+            logger.warning("Failed to read image for export: %s", image_path)
+            continue
+        height, width = img.shape[:2]
+        if width == 0 or height == 0:
+            continue
+
+        infer_width = width
+        infer_height = height
+        if image.output_path and image.inference_path:
+            infer_path = Path(settings.PROJECTS_ROOT_DIR) / image.inference_path
+            if infer_path.exists():
+                infer_img = cv2.imread(str(infer_path))
+                if infer_img is None:
+                    logger.warning("Failed to read inference image: %s", infer_path)
+                else:
+                    infer_height, infer_width = infer_img.shape[:2]
+        scale_x = width / infer_width if infer_width else 1.0
+        scale_y = height / infer_height if infer_height else 1.0
+
+        stem = image_path.stem
+        rgb_path = out_dir / f"{stem}.jpg"
+        cv2.imwrite(str(rgb_path), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+        seg_mask = np.zeros((height, width), dtype=np.uint8)
+        by_label = masks_by_image.get(image.id, {})
+
+        sorted_labels = sorted(by_label.items(), key=lambda item: label_index.get(item[0], 0))
+        for label_id, mask in sorted_labels:
+            pixel_val = label_index.get(label_id)
+            if pixel_val is None:
+                continue
+            draw_contours_on_mask(
+                seg_mask,
+                mask.contour_polygon,
+                value=pixel_val,
+                scale_x=scale_x,
+                scale_y=scale_y,
+            )
+
+        mask_path = out_dir / f"{stem}_mask.png"
+        cv2.imwrite(str(mask_path), seg_mask)
+
+    zip_path = export_dir / f"{project_name}_segmask.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for path in out_dir.rglob("*"):
+            zipf.write(path, path.relative_to(export_dir))
+    return zip_path, export_dir
 
 
 @router.get("/projects/{project_id}/export/segmask")
@@ -89,76 +172,15 @@ async def export_segmask(
             if not existing or mask.area > existing.area:
                 by_label[mask.label_id] = mask
 
-        export_dir = Path(tempfile.mkdtemp(prefix="segmentflow_segmask_"))
-        out_dir = export_dir / "segmask"
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        classes_path = out_dir / "classes.txt"
-        class_lines = [f"{idx + 1}: {label.name}" for idx, label in enumerate(labels)]
-        classes_path.write_text("\n".join(class_lines), encoding="utf-8")
-
-        for idx, image in enumerate(images):
-            if skip_n > 1 and idx % skip_n != 0:
-                continue
-            if image.validation != ValidationStatus.PASSED.value and not image.manually_labeled:
-                continue
-            image_rel = image.output_path or image.inference_path
-            if not image_rel:
-                continue
-
-            image_path = Path(settings.PROJECTS_ROOT_DIR) / image_rel
-            if not image_path.exists():
-                logger.warning("Missing image file for export: %s", image_path)
-                continue
-
-            img = cv2.imread(str(image_path))
-            if img is None:
-                logger.warning("Failed to read image for export: %s", image_path)
-                continue
-            height, width = img.shape[:2]
-            if width == 0 or height == 0:
-                continue
-
-            infer_width = width
-            infer_height = height
-            if image.output_path and image.inference_path:
-                infer_path = Path(settings.PROJECTS_ROOT_DIR) / image.inference_path
-                if infer_path.exists():
-                    infer_img = cv2.imread(str(infer_path))
-                    if infer_img is None:
-                        logger.warning("Failed to read inference image: %s", infer_path)
-                    else:
-                        infer_height, infer_width = infer_img.shape[:2]
-            scale_x = width / infer_width if infer_width else 1.0
-            scale_y = height / infer_height if infer_height else 1.0
-
-            stem = image_path.stem
-            rgb_path = out_dir / f"{stem}.jpg"
-            cv2.imwrite(str(rgb_path), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-            seg_mask = np.zeros((height, width), dtype=np.uint8)
-            by_label = masks_by_image.get(image.id, {})
-
-            sorted_labels = sorted(by_label.items(), key=lambda item: label_index.get(item[0], 0))
-            for label_id, mask in sorted_labels:
-                pixel_val = label_index.get(label_id)
-                if pixel_val is None:
-                    continue
-                draw_contours_on_mask(
-                    seg_mask,
-                    mask.contour_polygon,
-                    value=pixel_val,
-                    scale_x=scale_x,
-                    scale_y=scale_y,
-                )
-
-            mask_path = out_dir / f"{stem}_mask.png"
-            cv2.imwrite(str(mask_path), seg_mask)
-
-        zip_path = export_dir / f"{project.name}_segmask.zip"
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for path in out_dir.rglob("*"):
-                zipf.write(path, path.relative_to(export_dir))
+        zip_path, export_dir = await asyncio.to_thread(
+            _build_segmask_zip,
+            project.name,
+            images,
+            labels,
+            label_index,
+            masks_by_image,
+            skip_n,
+        )
 
         return FileResponse(
             str(zip_path),

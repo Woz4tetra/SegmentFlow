@@ -14,3 +14,4 @@ htmlcov/
 htmlcov/
 segmentflow.egginfo/
 .coverage
+segmentflow.db

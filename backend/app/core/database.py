@@ -136,7 +136,19 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
 
     db_url = settings.get_database_url()
     if _is_sqlite(db_url):
-        # SQLite doesn't support ALTER COLUMN, but it's more flexible with types
+        # SQLite-specific migrations
+        sqlite_migrations = [
+            # Migration: add labels.always_include if missing
+            """
+            ALTER TABLE labels ADD COLUMN always_include BOOLEAN NOT NULL DEFAULT 0;
+            """,
+        ]
+        for migration in sqlite_migrations:
+            try:
+                await conn.execute(text(migration))
+                logger.debug("Applied SQLite schema migration")
+            except Exception as e:
+                logger.debug(f"SQLite schema migration skipped or failed: {e}")
         return
 
     # PostgreSQL migrations
@@ -151,6 +163,19 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
             ) THEN
                 ALTER TABLE projects ALTER COLUMN trim_start TYPE DOUBLE PRECISION;
                 ALTER TABLE projects ALTER COLUMN trim_end TYPE DOUBLE PRECISION;
+            END IF;
+        END $$;
+        """,
+        # Migration: add labels.always_include boolean flag
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'labels' AND column_name = 'always_include'
+            ) THEN
+                ALTER TABLE labels ADD COLUMN always_include BOOLEAN NOT NULL DEFAULT FALSE;
             END IF;
         END $$;
         """,

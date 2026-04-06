@@ -138,6 +138,10 @@ class LabelBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Label name")
     color_hex: str = Field(..., description="Color in #RRGGBB format")
     thumbnail_path: str | None = Field(default=None, description="Optional path to label thumbnail")
+    always_include: bool = Field(
+        default=False,
+        description="Whether this label is auto-enabled for new BrettZone imports",
+    )
 
     @field_validator("color_hex")
     @classmethod
@@ -167,6 +171,10 @@ class LabelUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     color_hex: str | None = Field(None, description="Color in #RRGGBB format")
     thumbnail_path: str | None = Field(None, description="Path to thumbnail image")
+    always_include: bool | None = Field(
+        None,
+        description="Whether this label is auto-enabled for new BrettZone imports",
+    )
 
     @field_validator("color_hex")
     @classmethod
@@ -268,6 +276,56 @@ class VideoUploadCompleteResponse(BaseModel):
     message: str = Field(..., description="Confirmation message")
 
 
+class BrettzoneImportRequest(BaseModel):
+    """Schema for importing a video directly from BrettZone."""
+
+    brettzone_url: str | None = Field(
+        default=None,
+        description="Specific BrettZone URL to import from. Optional when lucky=true.",
+    )
+    project_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Optional override name for the created project.",
+    )
+    lucky: bool = Field(
+        default=False,
+        description="If true, ignore URL and import a random BrettZone video.",
+    )
+
+    @field_validator("brettzone_url")
+    @classmethod
+    def validate_brettzone_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        lowered = cleaned.lower()
+        if not (
+            lowered.startswith("https://brettzone.net/")
+            or lowered.startswith("http://brettzone.net/")
+            or lowered.startswith("https://www.brettzone.net/")
+            or lowered.startswith("http://www.brettzone.net/")
+            or lowered.startswith("https://brettzone.nhrl.io/")
+            or lowered.startswith("http://brettzone.nhrl.io/")
+        ):
+            raise ValueError("brettzone_url must point to a BrettZone host")
+        return cleaned
+
+
+class BrettzoneImportResponse(BaseModel):
+    """Schema for BrettZone import response."""
+
+    project: ProjectResponse
+    fight_url: str = Field(..., description="Fight page URL selected for this import")
+    media_url: str = Field(..., description="Direct video URL downloaded")
+    camera: str = Field(..., description="Camera label for the selected recording")
+    file_size: int = Field(..., ge=0, description="Size of downloaded video in bytes")
+    message: str = Field(..., description="Import status message")
+
+
 # ===== Image Schemas =====
 
 
@@ -324,6 +382,36 @@ class ImageValidationUpdate(BaseModel):
             msg = f"Invalid validation status: {v}. Must be one of {valid_statuses}"
             raise ValueError(msg)
         return v
+
+
+class ImageValidationRangeResponse(BaseModel):
+    """Schema for range-based validation updates."""
+
+    validation: str = Field(..., description="Validation status applied to frames")
+    updated_frame_numbers: list[int] = Field(
+        default_factory=list,
+        description="Frame numbers that were updated",
+    )
+    updated_count: int = Field(..., ge=0, description="Number of updated frames")
+    start_frame: int = Field(..., ge=0, description="Start frame of computed update range")
+    end_frame: int = Field(..., ge=0, description="End frame of computed update range")
+
+
+class FrameIndexEntry(BaseModel):
+    """Compact per-frame data used for manual-labeling startup/navigation."""
+
+    frame_number: int = Field(..., ge=0, description="Frame number")
+    status: str = Field(..., description="Processing status")
+    manually_labeled: bool = Field(False, description="Whether manually labeled")
+    validation: str = Field(..., description="Validation status")
+    has_mask: bool = Field(False, description="Whether any mask exists")
+
+
+class FrameIndexResponse(BaseModel):
+    """Compact frame index for fast manual-labeling startup."""
+
+    frames: list[FrameIndexEntry] = Field(..., description="Compact per-frame entries")
+    total: int = Field(..., ge=0, description="Total number of frames")
 
 
 class FrameStatus(BaseModel):
@@ -589,6 +677,16 @@ class SaveLabeledPointsRequest(BaseModel):
 
     label_id: UUID = Field(..., description="Label UUID")
     points: list[LabeledPointCreate] = Field(..., description="List of points to save")
+
+
+class SaveLabeledPointsResponse(BaseModel):
+    """Schema for saving points and returning the latest persisted mask."""
+
+    points: list[LabeledPointResponse] = Field(..., description="Saved points for the label")
+    mask: MaskResponse | None = Field(
+        None,
+        description="Persisted mask for the label, if SAM inference succeeded",
+    )
 
 
 class SaveMaskRequest(BaseModel):

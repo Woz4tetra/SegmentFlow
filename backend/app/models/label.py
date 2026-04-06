@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String
+from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -26,6 +26,7 @@ class Label(BaseModel):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     color_hex: Mapped[str] = mapped_column(String(7), nullable=False)  # #RRGGBB
     thumbnail_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    always_include: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relationships
     points: Mapped[list["LabeledPoint"]] = relationship(

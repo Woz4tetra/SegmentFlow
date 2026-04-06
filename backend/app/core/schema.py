@@ -134,7 +134,7 @@ class ProcessingConfig:
     inference_width: int = 1024
     output_width: int = 1920
     mask_transparency: float = 0.5
-    big_jump_size: int = 500
+    big_jump_size: int = 1000
 
 
 @dataclass

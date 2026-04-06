@@ -36,6 +36,18 @@
 
         <div class="export-option">
           <div class="export-info">
+            <h3>YOLO-Seg Export</h3>
+            <p>Polygon segmentation labels (`class x1 y1 ... xn yn`) with normalized coordinates in a ZIP.</p>
+          </div>
+          <button class="primary large yoloseg" type="button" :disabled="downloadingYoloSeg" @click="downloadYoloSeg">
+            {{ downloadingYoloSeg ? 'Preparing...' : 'Download YOLO-Seg ZIP' }}
+          </button>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="export-option">
+          <div class="export-info">
             <h3>Segmentation Mask Export</h3>
             <p>RGB images (JPG) and pixel-valued segmentation masks (PNG) in a ZIP. Label&nbsp;#1&nbsp;=&nbsp;pixel&nbsp;1, etc.</p>
           </div>
@@ -79,6 +91,7 @@ const api = axios.create({
 
 const loading = ref(true);
 const downloadingYolo = ref(false);
+const downloadingYoloSeg = ref(false);
 const downloadingMask = ref(false);
 const error = ref('');
 const project = ref<Project | null>(null);
@@ -138,6 +151,20 @@ async function downloadMask(): Promise<void> {
     error.value = 'Failed to download mask export. Please try again.';
   } finally {
     downloadingMask.value = false;
+  }
+}
+
+async function downloadYoloSeg(): Promise<void> {
+  if (downloadingYoloSeg.value) return;
+  downloadingYoloSeg.value = true;
+  error.value = '';
+  try {
+    const skipParam = userSettings.export_skip_n > 1 ? `?skip_n=${userSettings.export_skip_n}` : '';
+    triggerDownload(buildApiUrl(`/projects/${projectId}/export/yolo-seg${skipParam}`));
+  } catch (err) {
+    error.value = 'Failed to download YOLO-seg export. Please try again.';
+  } finally {
+    downloadingYoloSeg.value = false;
   }
 }
 
@@ -242,6 +269,14 @@ onMounted(async () => {
 
 .primary.large.segmask:hover:not(:disabled) {
   box-shadow: 0 8px 24px rgba(5, 150, 105, 0.35);
+}
+
+.primary.large.yoloseg {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+}
+
+.primary.large.yoloseg:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35);
 }
 
 .primary.large {

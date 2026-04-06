@@ -15,6 +15,7 @@
         <tr>
           <th style="width:36px">Color</th>
           <th>Name</th>
+          <th style="width:140px">Always Include</th>
           <th style="width:140px">Thumbnail</th>
           <th style="width:220px">Actions</th>
         </tr>
@@ -28,8 +29,18 @@
             <input class="text-input" :value="lab.name" @change="(e: any) => renameLabel(lab, e.target.value)" />
           </td>
           <td>
+            <label class="check-wrap">
+              <input
+                type="checkbox"
+                :checked="lab.always_include"
+                @change="(e: any) => setAlwaysInclude(lab, !!e.target?.checked)"
+              />
+              <span>Always include</span>
+            </label>
+          </td>
+          <td>
             <div class="thumb">
-              <img v-if="lab.thumbnail_path" :src="`${lab.thumbnail_path}?t=${Date.now()}`" alt="Thumbnail" />
+              <img v-if="lab.thumbnail_path" :src="thumbnailSrc(lab.thumbnail_path)" alt="Thumbnail" />
               <span v-else class="placeholder">No thumbnail</span>
             </div>
           </td>
@@ -49,6 +60,7 @@
 
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue';
+import { resolveApiAssetUrl } from '../lib/api';
 import { useLabelsStore, parseColorInput } from '../stores/labels';
 import ColorPicker from '../components/ColorPicker.vue';
 
@@ -84,6 +96,11 @@ async function renameLabel(lab: any, name: string) {
   await labelsStore.updateLabel(lab.id, { name: n });
 }
 
+async function setAlwaysInclude(lab: any, enabled: boolean) {
+  if (enabled === lab.always_include) return;
+  await labelsStore.updateLabel(lab.id, { always_include: enabled });
+}
+
 function openPicker(lab: any) {
   pickerColor.value = lab.color_hex;
   pickerTargetId = lab.id;
@@ -110,6 +127,12 @@ async function onThumbUpload(lab: any, e: Event) {
     console.error('Thumbnail upload failed:', labelsStore.error);
   }
 }
+
+function thumbnailSrc(path: string): string {
+  const base = resolveApiAssetUrl(path);
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}t=${Date.now()}`;
+}
 </script>
 
 <style scoped>
@@ -132,4 +155,5 @@ async function onThumbUpload(lab: any, e: Event) {
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .placeholder { color: #64748B; font-size: 0.85rem; }
 .file-btn input { display: none; }
+.check-wrap { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; color: var(--text,#0f172a); }
 </style>

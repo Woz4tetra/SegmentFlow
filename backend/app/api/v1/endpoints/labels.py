@@ -3,6 +3,8 @@
 from pathlib import Path
 from uuid import UUID
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -14,6 +16,18 @@ from app.core.database import get_db
 from app.models.label import Label
 
 router = APIRouter()
+THUMBNAIL_SIZE = 128
+
+
+def _resize_thumbnail_to_square(image: np.ndarray, target_size: int = THUMBNAIL_SIZE) -> np.ndarray:
+    height, width = image.shape[:2]
+    side = min(height, width)
+    top = max(0, (height - side) // 2)
+    left = max(0, (width - side) // 2)
+    cropped = image[top : top + side, left : left + side]
+    if cropped.shape[0] == target_size and cropped.shape[1] == target_size:
+        return cropped
+    return cv2.resize(cropped, (target_size, target_size), interpolation=cv2.INTER_AREA)
 
 
 @router.get(
@@ -44,6 +58,7 @@ async def create_label(
             name=label_in.name,
             color_hex=label_in.color_hex,
             thumbnail_path=label_in.thumbnail_path,
+            always_include=label_in.always_include,
         )
         db.add(db_label)
         await db.commit()
@@ -125,16 +140,28 @@ async def upload_label_thumbnail(
             detail=f"Failed to prepare thumbnail directory: {e!s}",
         ) from e
 
-    # Determine extension from uploaded filename (fallback to .png)
-    original_name = file.filename or "thumbnail.png"
-    ext = Path(original_name).suffix.lower() or ".png"
-    if ext not in {".png", ".jpg", ".jpeg"}:
-        ext = ".png"
-    dest_path = thumbs_dir / f"{label_id}{ext}"
+    # Normalize all uploaded thumbnails to 128x128 JPG.
+    dest_path = thumbs_dir / f"{label_id}.jpg"
 
     try:
         contents = await file.read()
-        dest_path.write_bytes(contents)
+        np_data = np.frombuffer(contents, dtype=np.uint8)
+        decoded = cv2.imdecode(np_data, cv2.IMREAD_UNCHANGED)
+        if decoded is None:
+            raise ValueError("Unsupported or invalid image data")
+        resized = _resize_thumbnail_to_square(decoded)
+        if resized.ndim == 3 and resized.shape[2] == 4:
+            resized = cv2.cvtColor(resized, cv2.COLOR_BGRA2BGR)
+        if resized.ndim == 2:
+            resized = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)
+        ok = cv2.imwrite(str(dest_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not ok:
+            raise ValueError("Failed to encode resized thumbnail")
+        # Remove legacy files so the fetch endpoint always serves normalized JPG.
+        for ext in (".png", ".jpeg"):
+            legacy_path = thumbs_dir / f"{label_id}{ext}"
+            if legacy_path.exists():
+                legacy_path.unlink()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -175,7 +202,7 @@ async def get_label_thumbnail(
 
     root = Path(settings.PROJECTS_ROOT_DIR)
     thumbs_dir = root / "label_thumbs"
-    for ext in (".png", ".jpg", ".jpeg"):
+    for ext in (".jpg", ".jpeg", ".png"):
         candidate = thumbs_dir / f"{label_id}{ext}"
         if candidate.exists():
             return FileResponse(candidate)

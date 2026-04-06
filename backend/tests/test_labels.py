@@ -30,6 +30,7 @@ class TestLabelCreate:
         assert data["name"] == "Person"
         assert data["color_hex"] == "#00FF00"
         assert data["thumbnail_path"] is None
+        assert data["always_include"] is False
 
     @pytest.mark.asyncio
     async def test_create_label_invalid_color(
@@ -65,6 +66,7 @@ class TestLabelCreate:
         data = resp.json()
         assert data["name"] == "Person"
         assert data["thumbnail_path"] == "/path/to/thumb.png"
+        assert data["always_include"] is False
 
     @pytest.mark.asyncio
     async def test_create_label_empty_name(
@@ -149,6 +151,7 @@ class TestLabelUpdate:
         data = resp.json()
         assert data["name"] == "Vehicle"
         assert data["color_hex"] == "#00FFFF"
+        assert data["always_include"] is False
 
     @pytest.mark.asyncio
     async def test_update_label_name_only(
@@ -197,6 +200,7 @@ class TestLabelUpdate:
         data = resp.json()
         assert data["name"] == original_name  # Should be unchanged
         assert data["color_hex"] == "#00FFFF"
+        assert data["always_include"] is False
 
     @pytest.mark.asyncio
     async def test_update_label_thumbnail(
@@ -216,6 +220,7 @@ class TestLabelUpdate:
         )
         assert resp.status_code == 200
         assert resp.json()["thumbnail_path"] == "/thumbs/dog.png"
+        assert resp.json()["always_include"] is False
 
     @pytest.mark.asyncio
     async def test_update_label_invalid_color(
@@ -286,6 +291,7 @@ class TestLabelUpdate:
                 "name": "Dog",
                 "color_hex": "#0000FF",
                 "thumbnail_path": "/new/path.png",
+                "always_include": True,
             },
         )
         assert resp.status_code == 200
@@ -293,6 +299,7 @@ class TestLabelUpdate:
         assert data["name"] == "Dog"
         assert data["color_hex"] == "#0000FF"
         assert data["thumbnail_path"] == "/new/path.png"
+        assert data["always_include"] is True
 
     @pytest.mark.asyncio
     async def test_update_label_invalid_uuid(

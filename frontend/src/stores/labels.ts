@@ -7,6 +7,7 @@ export interface Label {
   name: string;
   color_hex: string; // #RRGGBB
   thumbnail_path?: string | null;
+  always_include: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -95,7 +96,11 @@ export const useLabelsStore = defineStore('labels', {
     async createLabel(name: string, colorHex?: string): Promise<Label | null> {
       try {
         const color = (colorHex && parseColorInput(colorHex)) || randomPaletteHex();
-        const { data } = await api.post<Label>(`/labels`, { name, color_hex: color });
+        const { data } = await api.post<Label>(`/labels`, {
+          name,
+          color_hex: color,
+          always_include: false,
+        });
         this.labels = [...this.labels, data];
         return data;
       } catch (err) {
@@ -105,7 +110,10 @@ export const useLabelsStore = defineStore('labels', {
         this.error = msg; return null;
       }
     },
-    async updateLabel(labelId: string, payload: Partial<{ name: string; color_hex: string; thumbnail_path: string | null }>): Promise<Label | null> {
+    async updateLabel(
+      labelId: string,
+      payload: Partial<{ name: string; color_hex: string; thumbnail_path: string | null; always_include: boolean }>
+    ): Promise<Label | null> {
       try {
         const upd = { ...payload } as any;
         if (upd.color_hex) {
