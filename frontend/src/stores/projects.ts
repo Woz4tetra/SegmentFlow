@@ -28,6 +28,15 @@ interface ProjectListResponse {
   total: number;
 }
 
+export interface PropagationJobResponse {
+  job_id: string;
+  project_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  total_segments: number;
+  total_frames: number;
+  message: string;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
@@ -95,6 +104,24 @@ export const useProjectsStore = defineStore('projects', {
               : 'Failed to delete project';
         this.error = message;
         return false;
+      }
+    },
+    async startPropagation(projectId: string): Promise<PropagationJobResponse | null> {
+      try {
+        const { data } = await api.post<PropagationJobResponse>(
+          `/projects/${projectId}/propagate`,
+          { project_id: projectId },
+        );
+        return data ?? null;
+      } catch (err) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.detail
+            ? String(err.response.data.detail)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to start propagation';
+        this.error = message;
+        return null;
       }
     },
   },

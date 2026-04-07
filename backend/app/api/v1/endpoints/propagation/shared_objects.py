@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -40,9 +41,50 @@ router = APIRouter()
 propagation_jobs: dict[str, dict[str, Any]] = {}
 job_websockets: dict[str, list[WebSocket]] = {}
 job_lock = asyncio.Lock()
+propagation_queue: deque[str] = deque()
+active_propagation_job_id: str | None = None
 
 # Track background tasks to prevent garbage collection
 background_tasks: set[asyncio.Task[None]] = set()
+
+def _track_background_task(task: asyncio.Task[None]) -> None:
+    """Track a background task to prevent garbage collection."""
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+
+
+async def enqueue_propagation_job(job_id: str) -> None:
+    """Enqueue a propagation job and trigger queue processing."""
+    async with job_lock:
+        propagation_queue.append(job_id)
+
+    await launch_next_propagation_job()
+
+
+async def launch_next_propagation_job() -> None:
+    """Launch the next queued propagation job if no job is active."""
+    global active_propagation_job_id
+
+    next_job_id: str | None = None
+
+    async with job_lock:
+        if active_propagation_job_id is not None:
+            return
+
+        while propagation_queue:
+            candidate = propagation_queue.popleft()
+            job = propagation_jobs.get(candidate)
+            if job is None or job.get("status") != "queued":
+                continue
+            next_job_id = candidate
+            active_propagation_job_id = candidate
+            break
+
+    if next_job_id is None:
+        return
+
+    task = asyncio.create_task(run_propagation_job(next_job_id))
+    _track_background_task(task)
 
 
 def mask_to_contour(mask: np.ndarray) -> tuple[list[list[float]], float]:
@@ -643,23 +685,22 @@ async def process_segment(
         return  # Only process one session
 
 
-async def run_propagation_job(
-    job_id: str,
-    project_id: uuid.UUID,
-    segments: list[PropagationSegment],
-    source_frames_data: list[dict[str, Any]],
-    db_factory: Callable[[], AsyncGenerator[AsyncSession, None]],
-) -> None:
+async def run_propagation_job(job_id: str) -> None:
     """Run the propagation job in a background task.
 
     Args:
         job_id: Unique job identifier
-        project_id: UUID of the project
-        segments: List of propagation segments
-        source_frames_data: Data about source frames with their points
-        db_factory: Factory function to create database sessions
     """
-    job = propagation_jobs[job_id]
+    global active_propagation_job_id
+
+    job = propagation_jobs.get(job_id)
+    if job is None:
+        return
+
+    project_id = job["project_id"]
+    segments = job["segments"]
+    source_frames_data = job["source_frames_data"]
+    db_factory = job["db_factory"]
     job["status"] = "running"
     job["started_at"] = datetime.utcnow()
 
@@ -813,6 +854,13 @@ async def run_propagation_job(
         )
         job["progress"] = error_update
         await broadcast_progress(job_id, error_update)
+    finally:
+        async with job_lock:
+            if active_propagation_job_id == job_id:
+                active_propagation_job_id = None
+
+        next_task = asyncio.create_task(launch_next_propagation_job())
+        _track_background_task(next_task)
 
 
 async def broadcast_progress(job_id: str, update: PropagationProgressUpdate) -> None:

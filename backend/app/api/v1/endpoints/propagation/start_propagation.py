@@ -3,7 +3,6 @@
 Provides the POST endpoint to start a label propagation job.
 """
 
-import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -21,12 +20,11 @@ from app.models.project import Project
 
 from .shared_objects import (
     analyze_propagation_segments,
-    background_tasks,
+    enqueue_propagation_job,
     job_lock,
     job_websockets,
     propagation_jobs,
     router,
-    run_propagation_job,
 )
 
 __all__ = ["start_propagation"]
@@ -89,6 +87,10 @@ async def start_propagation(
     job_id = str(uuid.uuid4())
     total_frames = sum(seg.num_frames for seg in segments)
 
+    async def db_factory() -> AsyncGenerator[AsyncSession, None]:
+        async for session in get_db():
+            yield session
+
     async with job_lock:
         for existing_job in propagation_jobs.values():
             if (
@@ -109,31 +111,19 @@ async def start_propagation(
             "project_id": project_id,
             "status": "queued",
             "segments": segments,
+            "source_frames_data": source_frames_data,
             "total_segments": len(segments),
             "total_frames": total_frames,
             "progress": None,
             "started_at": None,
             "completed_at": None,
             "error": None,
+            "db_factory": db_factory,
         }
         job_websockets[job_id] = []
 
-    # Start background task
-    async def db_factory() -> AsyncGenerator[AsyncSession, None]:
-        async for session in get_db():
-            yield session
-
-    task = asyncio.create_task(
-        run_propagation_job(
-            job_id,
-            project_id,
-            segments,
-            source_frames_data,
-            db_factory,
-        )
-    )
-    background_tasks.add(task)
-    task.add_done_callback(background_tasks.discard)
+    # Start queue processing (runs immediately if idle)
+    await enqueue_propagation_job(job_id)
 
     return PropagationJobResponse(
         job_id=job_id,

@@ -49,7 +49,7 @@
           :disabled="selectedCount === 0 || bulkBusy"
           @click="bulkDropdownOpen = !bulkDropdownOpen"
         >
-          {{ bulkBusy ? 'Exporting...' : 'Run Action' }}
+          {{ bulkBusy ? 'Working...' : 'Run Action' }}
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M6 9l6 6 6-6"/>
           </svg>
@@ -67,6 +67,9 @@
         </div>
       </div>
     </div>
+  </div>
+  <div v-if="bulkResultMessage" class="bulk-result" :data-tone="bulkResultTone">
+    {{ bulkResultMessage }}
   </div>
 
   <section class="content">
@@ -198,7 +201,7 @@ import { API_BASE_URL, buildApiUrl } from '../lib/api';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
-const { fetchProjects, deleteProject } = projectsStore;
+const { fetchProjects, deleteProject, startPropagation } = projectsStore;
 
 const userSettingsStore = useUserSettingsStore();
 const { visible_columns } = storeToRefs(userSettingsStore);
@@ -367,6 +370,8 @@ const bulkMode = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 const bulkDropdownOpen = ref(false);
 const bulkBusy = ref(false);
+const bulkResultMessage = ref('');
+const bulkResultTone = ref<'success' | 'warning'>('success');
 
 const selectedCount = computed(() => selectedIds.value.size);
 const allSelected = computed(() =>
@@ -378,6 +383,7 @@ function toggleBulkMode(): void {
   if (!bulkMode.value) {
     selectedIds.value = new Set();
     bulkDropdownOpen.value = false;
+    bulkResultMessage.value = '';
   }
 }
 
@@ -399,9 +405,10 @@ function toggleSelectAll(): void {
   if (allSelected.value) deselectAll(); else selectAll();
 }
 
-type BulkAction = 'export_yolo' | 'export_segmask';
+type BulkAction = 'export_yolo' | 'export_segmask' | 'start_propagation';
 
 const bulkActions: { key: BulkAction; label: string }[] = [
+  { key: 'start_propagation', label: 'Start Propagation' },
   { key: 'export_yolo', label: 'Export YOLO' },
   { key: 'export_segmask', label: 'Export Segmentation Masks' },
 ];
@@ -421,22 +428,49 @@ async function runBulkAction(action: BulkAction): Promise<void> {
   bulkDropdownOpen.value = false;
   if (selectedIds.value.size === 0 || bulkBusy.value) return;
   bulkBusy.value = true;
+  bulkResultMessage.value = '';
 
   const ids = [...selectedIds.value];
-  const skipParam = userSettingsStore.export_skip_n > 1
-    ? `?skip_n=${userSettingsStore.export_skip_n}`
-    : '';
+  try {
+    if (action === 'start_propagation') {
+      let startedCount = 0;
+      const failures: string[] = [];
 
-  const pathSegment = action === 'export_yolo' ? 'yolo' : 'segmask';
+      for (const id of ids) {
+        const result = await startPropagation(id);
+        if (result) {
+          startedCount += 1;
+        } else {
+          failures.push(`${id.slice(0, 8)}: ${projectsStore.error || 'Failed to start propagation'}`);
+        }
+      }
 
-  for (let i = 0; i < ids.length; i++) {
-    triggerDownload(buildApiUrl(`/projects/${ids[i]}/export/${pathSegment}${skipParam}`));
-    if (i < ids.length - 1) {
-      await new Promise(r => setTimeout(r, 500));
+      bulkResultTone.value = failures.length > 0 ? 'warning' : 'success';
+      const failureSnippet =
+        failures.length > 0
+          ? ` Failed (${failures.length}): ${failures.slice(0, 3).join(' | ')}${failures.length > 3 ? ' ...' : ''}`
+          : '';
+      bulkResultMessage.value = `Propagation queued for ${startedCount}/${ids.length} selected projects.${failureSnippet}`;
+      return;
     }
-  }
 
-  bulkBusy.value = false;
+    const skipParam = userSettingsStore.export_skip_n > 1
+      ? `?skip_n=${userSettingsStore.export_skip_n}`
+      : '';
+    const pathSegment = action === 'export_yolo' ? 'yolo' : 'segmask';
+
+    for (let i = 0; i < ids.length; i++) {
+      triggerDownload(buildApiUrl(`/projects/${ids[i]}/export/${pathSegment}${skipParam}`));
+      if (i < ids.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    bulkResultTone.value = 'success';
+    bulkResultMessage.value = `Started ${ids.length} export download${ids.length === 1 ? '' : 's'}.`;
+  } finally {
+    bulkBusy.value = false;
+  }
 }
 
 const handleGlobalClick = () => {
@@ -955,6 +989,21 @@ h1 {
   border-radius: 14px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
   margin-bottom: 1rem;
+}
+
+.bulk-result {
+  margin: -0.25rem 0 1rem;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border, #dfe3ec);
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--text, #0f172a);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.bulk-result[data-tone='warning'] {
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .bulk-toolbar__left {
