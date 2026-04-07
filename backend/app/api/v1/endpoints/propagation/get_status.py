@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from app.api.v1.schemas import PropagationStatusResponse
 
 from .shared_objects import (
+    job_lock,
     propagation_jobs,
     router,
 )
@@ -34,19 +35,20 @@ async def get_propagation_status(
     Raises:
         HTTPException: If job not found
     """
-    if job_id not in propagation_jobs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Propagation job not found: {job_id}",
-        )
+    async with job_lock:
+        if job_id not in propagation_jobs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Propagation job not found: {job_id}",
+            )
 
-    job = propagation_jobs[job_id]
+        job = propagation_jobs[job_id]
 
-    if job["project_id"] != project_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Propagation job {job_id} not found for project {project_id}",
-        )
+        if job["project_id"] != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Propagation job {job_id} not found for project {project_id}",
+            )
 
     return PropagationStatusResponse(
         job_id=job_id,

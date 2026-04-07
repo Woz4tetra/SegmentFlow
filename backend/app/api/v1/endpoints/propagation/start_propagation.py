@@ -90,6 +90,20 @@ async def start_propagation(
     total_frames = sum(seg.num_frames for seg in segments)
 
     async with job_lock:
+        for existing_job in propagation_jobs.values():
+            if (
+                existing_job["project_id"] == project_id
+                and existing_job["status"] in {"queued", "running"}
+            ):
+                return PropagationJobResponse(
+                    job_id=existing_job["job_id"],
+                    project_id=project_id,
+                    status=existing_job["status"],
+                    total_segments=existing_job["total_segments"],
+                    total_frames=existing_job["total_frames"],
+                    message="An active propagation job already exists for this project",
+                )
+
         propagation_jobs[job_id] = {
             "job_id": job_id,
             "project_id": project_id,

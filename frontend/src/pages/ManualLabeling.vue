@@ -260,7 +260,7 @@
                   class="label-thumbnail-preview"
                 >
                   <img 
-                    :src="label.thumbnail_path" 
+                    :src="thumbnailSrc(label.thumbnail_path)" 
                     :alt="`${label.name} thumbnail`"
                     @error="handleThumbnailError"
                   />
@@ -311,7 +311,7 @@
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
-import { API_BASE_URL, buildApiUrl } from '../lib/api';
+import { API_BASE_URL, buildApiUrl, resolveApiAssetUrl } from '../lib/api';
 import StageNavigation from '../components/StageNavigation.vue';
 import ImageViewer from '../components/ImageViewer.vue';
 import FrameStatusSlider from '../components/FrameStatusSlider.vue';
@@ -358,11 +358,32 @@ interface FrameStatusData {
   has_mask: boolean;
 }
 
+interface FrameIndexResponse {
+  frames: FrameStatusData[];
+  total: number;
+}
+
+interface ClearFrameLabelsResponse {
+  success: boolean;
+  points_deleted: number;
+  masks_deleted: number;
+  frame_number: number;
+  manually_labeled: boolean;
+}
+
+interface ValidationRangeUpdateResponse {
+  validation: 'not_validated' | 'passed' | 'failed';
+  updated_frame_numbers: number[];
+  updated_count: number;
+  start_frame: number;
+  end_frame: number;
+}
+
 const route = useRoute();
 const router = useRouter();
-const projectId = String(route.params.id ?? '');
-const api = axios.create({ 
-  baseURL: API_BASE_URL, 
+const projectId = computed(() => String(route.params.id ?? ''));
+const api = axios.create({
+  baseURL: API_BASE_URL,
 });
 
 const loading = ref(true);
@@ -381,6 +402,7 @@ const sidebarVisible = ref(true); // Sidebar visibility state
 const showClearAllConfirm = ref(false); // Clear all confirmation dialog
 const imageViewerRef = ref<InstanceType<typeof ImageViewer> | null>(null); // Ref to ImageViewer component
 const validationBusy = ref(false);
+const pageLoadToken = ref(0);
 
 const isValidationMode = computed(() => route.name === 'Validation');
 const enabledLabels = computed(() => labels.value.filter(label => label.enabled));
@@ -398,7 +420,7 @@ const currentImage = computed(() => {
 
 const currentImageUrl = computed(() => {
   // CANVAS-003: Construct image URL from backend endpoint
-  return buildApiUrl(`/projects/${projectId}/frames/${currentFrameNumber.value}`);
+  return buildApiUrl(`/projects/${projectId.value}/frames/${currentFrameNumber.value}`);
 });
 
 const frameStatus = computed(() => {
@@ -461,7 +483,7 @@ const maskStatusByFrame = ref<Map<number, boolean>>(new Map());
 
 async function fetchProject(): Promise<void> {
   try {
-    const { data } = await api.get<Project>(`/projects/${projectId}`);
+    const { data } = await api.get<Project>(`/projects/${projectId.value}`);
     project.value = data;
   } catch (error) {
     console.error('Failed to fetch project:', error);
@@ -470,7 +492,7 @@ async function fetchProject(): Promise<void> {
 
 async function markStageVisited(): Promise<void> {
   try {
-    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
+    const { data } = await api.post<Project>(`/projects/${projectId.value}/mark_stage_visited?stage=manual_labeling`);
     // Update local project data with response
     if (data) {
       project.value = data;
@@ -495,7 +517,7 @@ async function fetchLabels(): Promise<void> {
   try {
     console.log('Fetching project label settings');
     const { data } = await api.get<LabelSetting[]>(
-      `/projects/${projectId}/label_settings`,
+      `/projects/${projectId.value}/label_settings`,
     );
     console.log('Fetched project labels:', data.length);
     labels.value = data || [];
@@ -524,13 +546,18 @@ async function setValidationStatus(status: 'passed' | 'failed'): Promise<void> {
   if (!currentImage.value || validationBusy.value) return;
   validationBusy.value = true;
   try {
-    const { data } = await api.patch<{ images: ImageData[]; total: number }>(
-      `/projects/${projectId}/frames/${currentFrameNumber.value}/validation`,
+    const { data } = await api.patch<ValidationRangeUpdateResponse>(
+      `/projects/${projectId.value}/frames/${currentFrameNumber.value}/validation/range`,
       { validation: status },
     );
-    images.value = data.images || [];
-    totalFrames.value = data.total || images.value.length;
-    fetchMaskStatus();
+    if (data?.updated_frame_numbers?.length) {
+      const updated = new Set<number>(data.updated_frame_numbers);
+      for (const image of images.value) {
+        if (updated.has(image.frame_number) && !image.manually_labeled) {
+          image.validation = status;
+        }
+      }
+    }
   } catch (error) {
     console.error('Failed to update validation status:', error);
   } finally {
@@ -566,19 +593,25 @@ function handleThumbnailError(event: Event): void {
   }
 }
 
+function thumbnailSrc(path: string | null): string {
+  return path ? resolveApiAssetUrl(path) : '';
+}
+
 // Clear a specific label's points and masks from the current frame
 async function clearLabelFromFrame(labelId: string): Promise<void> {
   try {
-    await api.delete(
-      `/projects/${projectId}/frames/${currentFrameNumber.value}/labels`,
+    const { data } = await api.delete<ClearFrameLabelsResponse>(
+      `/projects/${projectId.value}/frames/${currentFrameNumber.value}/labels`,
       { params: { label_id: labelId } }
     );
     // Refresh the image viewer to clear the displayed points/masks
     if (imageViewerRef.value) {
       await imageViewerRef.value.refreshPointsAndMasks();
     }
-    // Update the images list
-    await refreshImagesList();
+    const image = images.value.find(img => img.frame_number === currentFrameNumber.value);
+    if (image) {
+      image.manually_labeled = Boolean(data?.manually_labeled);
+    }
     // Update mask status for current frame
     await updateCurrentFrameMaskStatus();
   } catch (error) {
@@ -590,13 +623,18 @@ async function clearLabelFromFrame(labelId: string): Promise<void> {
 async function clearAllLabelsFromFrame(): Promise<void> {
   showClearAllConfirm.value = false;
   try {
-    await api.delete(`/projects/${projectId}/frames/${currentFrameNumber.value}/labels`);
+    const { data } = await api.delete<ClearFrameLabelsResponse>(
+      `/projects/${projectId.value}/frames/${currentFrameNumber.value}/labels`,
+    );
     // Refresh the image viewer to clear the displayed points/masks
     if (imageViewerRef.value) {
       await imageViewerRef.value.refreshPointsAndMasks();
     }
-    // Update the images list
-    await refreshImagesList();
+    const image = images.value.find(img => img.frame_number === currentFrameNumber.value);
+    if (image) {
+      image.manually_labeled = Boolean(data?.manually_labeled);
+      image.has_mask = false;
+    }
     // Update mask status for current frame (should be false after clear all)
     maskStatusByFrame.value.set(currentFrameNumber.value, false);
   } catch (error) {
@@ -607,22 +645,19 @@ async function clearAllLabelsFromFrame(): Promise<void> {
 // Update the mask status for the current frame
 async function updateCurrentFrameMaskStatus(): Promise<void> {
   try {
-    const response = await api.get(`/projects/${projectId}/frames/${currentFrameNumber.value}/masks`);
+    const response = await api.get(`/projects/${projectId.value}/frames/${currentFrameNumber.value}/masks`);
     const hasMasks = response.data && response.data.length > 0;
     maskStatusByFrame.value.set(currentFrameNumber.value, hasMasks);
+    const image = images.value.find(img => img.frame_number === currentFrameNumber.value);
+    if (image) {
+      image.has_mask = hasMasks;
+    }
   } catch {
     maskStatusByFrame.value.set(currentFrameNumber.value, false);
-  }
-}
-
-// Refresh the images list after clearing labels
-async function refreshImagesList(): Promise<void> {
-  try {
-    const { data } = await api.get<{ images: ImageData[]; total: number }>(`/projects/${projectId}/images`);
-    images.value = data.images || [];
-    totalFrames.value = data.total || 0;
-  } catch (error) {
-    console.error('Failed to refresh images:', error);
+    const image = images.value.find(img => img.frame_number === currentFrameNumber.value);
+    if (image) {
+      image.has_mask = false;
+    }
   }
 }
 
@@ -636,11 +671,23 @@ function toggleSidebar(): void {
 
 async function fetchImages(): Promise<void> {
   try {
-    console.log('Fetching images for project:', projectId);
-    const { data } = await api.get<{ images: ImageData[]; total: number }>(`/projects/${projectId}/images`);
-    console.log('Fetched images:', { total: data.total, count: data.images?.length });
-    images.value = data.images || [];
+    console.log('Fetching images for project:', projectId.value);
+    const { data } = await api.get<FrameIndexResponse>(`/projects/${projectId.value}/frame-index`);
+    console.log('Fetched frame index:', { total: data.total, count: data.frames?.length });
+    images.value = (data.frames || []).map((frame) => ({
+      id: `frame-${frame.frame_number}`,
+      frame_number: frame.frame_number,
+      inference_path: null,
+      output_path: null,
+      status: frame.status,
+      manually_labeled: frame.manually_labeled,
+      validation: frame.validation,
+      has_mask: frame.has_mask,
+    }));
     totalFrames.value = data.total || 0;
+    maskStatusByFrame.value = new Map(
+      images.value.map((img) => [img.frame_number, Boolean(img.has_mask)]),
+    );
     
     // Set current frame to first available frame
     if (images.value.length > 0) {
@@ -735,10 +782,10 @@ async function goToPropagation(): Promise<void> {
   
   try {
     // Mark propagation stage as visited before navigating
-    const { data } = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=propagation`);
+    const { data } = await api.post<Project>(`/projects/${projectId.value}/mark_stage_visited?stage=propagation`);
     project.value = data;
     // Ensure stage is set to propagation for nav state
-    const stageResponse = await api.patch<Project>(`/projects/${projectId}`, { stage: 'propagation' });
+    const stageResponse = await api.patch<Project>(`/projects/${projectId.value}`, { stage: 'propagation' });
     if (stageResponse.data) {
       project.value = stageResponse.data;
     }
@@ -746,13 +793,13 @@ async function goToPropagation(): Promise<void> {
     console.error('Failed to mark propagation stage as visited:', error);
   }
   
-  router.push({ name: 'Propagation', params: { id: projectId } });
+  router.push({ name: 'Propagation', params: { id: projectId.value } });
 }
 
 function handlePrepareAction(): void {
   if (labeledFrameCount.value === 0) return;
   if (isValidationMode.value) {
-    router.push({ name: 'Export', params: { id: projectId } });
+    router.push({ name: 'Export', params: { id: projectId.value } });
   } else {
     goToPropagation();
   }
@@ -767,7 +814,7 @@ function goToFrameFromSlider(frameNumber: number): void {
 async function fetchMaskStatus(): Promise<void> {
   try {
     const { data } = await api.get<{ frames: FrameStatusData[] }>(
-      `/projects/${projectId}/frame-statuses`,
+      `/projects/${projectId.value}/frame-statuses`,
     );
     const statusMap = new Map<number, boolean>();
     for (const frame of data.frames || []) {
@@ -832,56 +879,87 @@ function handleKeyDown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(async () => {
+function resetProjectScopedState(): void {
+  project.value = null;
+  images.value = [];
+  labels.value = [];
+  selectedLabel.value = null;
+  currentFrameNumber.value = 0;
+  totalFrames.value = 0;
+  frameInput.value = null;
+  hoveredLabelId.value = null;
+  showClearAllConfirm.value = false;
+  maskStatusByFrame.value = new Map();
+  validationBusy.value = false;
+  imageViewerRef.value?.clearAllPoints();
+}
+
+async function initializePageData(): Promise<void> {
+  const token = pageLoadToken.value + 1;
+  pageLoadToken.value = token;
   loading.value = true;
+  resetProjectScopedState();
   
   try {
     // Mark all previous stages as visited to ensure they're in the visited state
-    const uploadRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=upload`);
+    const uploadRes = await api.post<Project>(`/projects/${projectId.value}/mark_stage_visited?stage=upload`);
+    if (pageLoadToken.value !== token) return;
     if (uploadRes.data) {
       project.value = uploadRes.data;
     }
     
-    const trimRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=trim`);
+    const trimRes = await api.post<Project>(`/projects/${projectId.value}/mark_stage_visited?stage=trim`);
+    if (pageLoadToken.value !== token) return;
     if (trimRes.data) {
       project.value = trimRes.data;
     }
     
     // Mark this stage as visited
-    const manualRes = await api.post<Project>(`/projects/${projectId}/mark_stage_visited?stage=manual_labeling`);
+    const manualRes = await api.post<Project>(`/projects/${projectId.value}/mark_stage_visited?stage=manual_labeling`);
+    if (pageLoadToken.value !== token) return;
     if (manualRes.data) {
       project.value = manualRes.data;
     }
     if (isValidationMode.value) {
       const validationRes = await api.post<Project>(
-        `/projects/${projectId}/mark_stage_visited?stage=validation`,
+        `/projects/${projectId.value}/mark_stage_visited?stage=validation`,
       );
+      if (pageLoadToken.value !== token) return;
       if (validationRes.data) {
         project.value = validationRes.data;
       }
       if (project.value?.stage !== 'validation') {
         const stageRes = await api.patch<Project>(
-          `/projects/${projectId}`,
+          `/projects/${projectId.value}`,
           { stage: 'validation' },
         );
+        if (pageLoadToken.value !== token) return;
         if (stageRes.data) {
           project.value = stageRes.data;
         }
       }
     }
     
-    // Load images, labels, and settings from backend
+    // Load the essentials for first interactive paint.
     await Promise.all([fetchImages(), fetchLabels(), fetchSettings()]);
-    
-    // PROP-UI-004: Fetch mask status for slider display
-    // Do this after images are loaded, but don't block the UI
-    fetchMaskStatus();
+    if (pageLoadToken.value !== token) return;
+
+    // Defer heavier aggregate sync until after initial render.
+    setTimeout(() => {
+      if (pageLoadToken.value !== token) return;
+      void fetchMaskStatus();
+    }, 1200);
   } catch (error) {
     console.error('Failed during initialization:', error);
+  } finally {
+    if (pageLoadToken.value === token) {
+      loading.value = false;
+    }
   }
-  
-  loading.value = false;
+}
 
+onMounted(async () => {
+  await initializePageData();
   // Add keyboard event listener
   window.addEventListener('keydown', handleKeyDown);
 });
@@ -893,6 +971,16 @@ onUnmounted(() => {
 watch(enabledLabels, () => {
   syncSelectedLabel();
 });
+
+watch(
+  () => [projectId.value, isValidationMode.value],
+  async (nextValue, prevValue) => {
+    if (nextValue[0] === prevValue?.[0] && nextValue[1] === prevValue?.[1]) {
+      return;
+    }
+    await initializePageData();
+  },
+);
 </script>
 
 <style scoped>

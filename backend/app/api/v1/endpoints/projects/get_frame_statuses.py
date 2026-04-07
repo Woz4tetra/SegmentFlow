@@ -14,6 +14,7 @@ from app.models.image import Image
 from app.models.label import Label
 from app.models.mask import Mask
 from app.models.project import Project
+from app.models.project_label_setting import ProjectLabelSetting
 
 from .shared_objects import router
 
@@ -47,14 +48,27 @@ async def get_frame_statuses(
         images_result = await db.execute(query.order_by(Image.frame_number))
         images = list(images_result.scalars().all())
 
-        mask_result = await db.execute(
-            select(Mask.image_id).join(Image, Mask.image_id == Image.id).where(
-                Image.project_id == project_id
+        image_ids = [img.id for img in images]
+        if image_ids:
+            mask_result = await db.execute(
+                select(Mask.image_id).where(Mask.image_id.in_(image_ids)).distinct()
+            )
+            mask_image_ids = set(mask_result.scalars().all())
+        else:
+            mask_image_ids = set()
+
+        labels_count = await db.scalar(
+            select(func.count())
+            .select_from(ProjectLabelSetting)
+            .where(
+                ProjectLabelSetting.project_id == project_id,
+                ProjectLabelSetting.enabled.is_(True),
             )
         )
-        mask_image_ids = set(mask_result.scalars().all())
-
-        labels_count = await db.scalar(select(func.count()).select_from(Label)) or 0
+        if labels_count is None:
+            labels_count = 0
+        if labels_count == 0:
+            labels_count = await db.scalar(select(func.count()).select_from(Label)) or 0
 
         frames: list[FrameStatus] = []
         manual_frames = 0
