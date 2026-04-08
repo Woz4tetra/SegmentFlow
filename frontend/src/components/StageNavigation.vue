@@ -29,6 +29,8 @@
 <script lang="ts" setup>
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
+import { API_BASE_URL } from '../lib/api';
 
 interface Stage {
   id: string;
@@ -52,6 +54,9 @@ const props = defineProps<{
 }>();
 
 const router = useRouter();
+const api = axios.create({
+  baseURL: API_BASE_URL,
+});
 
 const stages: Stage[] = [
   { id: 'upload', name: 'Upload', route: 'Upload' },
@@ -114,13 +119,19 @@ function getStageTooltip(stage: Stage): string {
   return `Go to ${stage.name}`;
 }
 
-function navigateToStage(stageId: string): void {
+async function navigateToStage(stageId: string): Promise<void> {
   if (!canAccessStage(stageId)) {
     return;
   }
   
   const stage = stages.find(s => s.id === stageId);
   if (stage) {
+    try {
+      await api.patch(`/projects/${props.project.id}`, { stage: stageId });
+    } catch (error) {
+      console.error(`Failed to set project stage to ${stageId}:`, error);
+      return;
+    }
     router.push({ name: stage.route, params: { id: props.project.id } });
   }
 }

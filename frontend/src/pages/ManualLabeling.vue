@@ -704,12 +704,23 @@ async function fetchImages(): Promise<void> {
 }
 
 function goToFrame(): void {
-  if (frameInput.value !== null) {
-    const targetFrame = images.value.find(img => img.frame_number === frameInput.value);
-    if (targetFrame) {
-    currentFrameNumber.value = frameInput.value;
+  if (frameInput.value === null || images.value.length === 0) return;
+
+  const requested = Math.trunc(frameInput.value);
+  if (!Number.isFinite(requested)) return;
+
+  // Accept either absolute frame number or 1-based frame index shown in UI.
+  const byFrameNumber = images.value.find((img) => img.frame_number === requested);
+  if (byFrameNumber) {
+    currentFrameNumber.value = byFrameNumber.frame_number;
     frameInput.value = null;
-    }
+    return;
+  }
+
+  const oneBasedIndex = requested - 1;
+  if (oneBasedIndex >= 0 && oneBasedIndex < images.value.length) {
+    currentFrameNumber.value = images.value[oneBasedIndex].frame_number;
+    frameInput.value = null;
   }
 }
 
