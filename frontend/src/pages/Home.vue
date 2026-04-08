@@ -201,7 +201,7 @@ import { API_BASE_URL, buildApiUrl } from '../lib/api';
 
 const projectsStore = useProjectsStore();
 const { projects, total, loading, error } = storeToRefs(projectsStore);
-const { fetchProjects, deleteProject, startPropagation } = projectsStore;
+const { fetchProjects, deleteProject, startPropagation, clearPropagatedFrames } = projectsStore;
 
 const userSettingsStore = useUserSettingsStore();
 const { visible_columns } = storeToRefs(userSettingsStore);
@@ -405,10 +405,11 @@ function toggleSelectAll(): void {
   if (allSelected.value) deselectAll(); else selectAll();
 }
 
-type BulkAction = 'export_yolo' | 'export_segmask' | 'start_propagation';
+type BulkAction = 'export_yolo' | 'export_segmask' | 'start_propagation' | 'clear_propagated_frames';
 
 const bulkActions: { key: BulkAction; label: string }[] = [
   { key: 'start_propagation', label: 'Start Propagation' },
+  { key: 'clear_propagated_frames', label: 'Clear Propagated Frames' },
   { key: 'export_yolo', label: 'Export YOLO' },
   { key: 'export_segmask', label: 'Export Segmentation Masks' },
 ];
@@ -451,6 +452,34 @@ async function runBulkAction(action: BulkAction): Promise<void> {
           ? ` Failed (${failures.length}): ${failures.slice(0, 3).join(' | ')}${failures.length > 3 ? ' ...' : ''}`
           : '';
       bulkResultMessage.value = `Propagation queued for ${startedCount}/${ids.length} selected projects.${failureSnippet}`;
+      return;
+    }
+
+    if (action === 'clear_propagated_frames') {
+      let successCount = 0;
+      let totalFramesCleared = 0;
+      let totalMasksDeleted = 0;
+      const failures: string[] = [];
+
+      for (const id of ids) {
+        const result = await clearPropagatedFrames(id);
+        if (result) {
+          successCount += 1;
+          totalFramesCleared += result.frames_cleared ?? 0;
+          totalMasksDeleted += result.masks_deleted ?? 0;
+        } else {
+          failures.push(`${id.slice(0, 8)}: ${projectsStore.error || 'Failed to clear propagated frames'}`);
+        }
+      }
+
+      bulkResultTone.value = failures.length > 0 ? 'warning' : 'success';
+      const failureSnippet =
+        failures.length > 0
+          ? ` Failed (${failures.length}): ${failures.slice(0, 3).join(' | ')}${failures.length > 3 ? ' ...' : ''}`
+          : '';
+      bulkResultMessage.value =
+        `Cleared propagated frames for ${successCount}/${ids.length} selected projects `
+        + `(${totalFramesCleared} frames, ${totalMasksDeleted} masks).${failureSnippet}`;
       return;
     }
 

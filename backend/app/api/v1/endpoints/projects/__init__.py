@@ -1,4 +1,5 @@
 from .cancel_video_upload import cancel_video_upload
+from .clear_propagated_frames import clear_propagated_frames
 from .clear_frame_labels import clear_frame_labels
 from .complete_video_upload import complete_video_upload
 from .create_project import create_project
@@ -33,6 +34,7 @@ from .video_info import video_info
 
 __all__ = [
     "cancel_video_upload",
+    "clear_propagated_frames",
     "clear_frame_labels",
     "complete_video_upload",
     "create_project",

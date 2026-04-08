@@ -129,6 +129,16 @@ class ProjectListResponse(BaseModel):
     total: int = Field(..., description="Total number of projects")
 
 
+class ClearPropagatedFramesResponse(BaseModel):
+    """Schema for project-level propagated-frame clearing."""
+
+    success: bool = Field(..., description="Whether the operation succeeded")
+    project_id: UUID = Field(..., description="Project UUID")
+    frames_cleared: int = Field(..., ge=0, description="Number of affected frames")
+    masks_deleted: int = Field(..., ge=0, description="Number of deleted masks")
+    message: str = Field(..., description="Operation result message")
+
+
 # ===== Label Schemas =====
 
 

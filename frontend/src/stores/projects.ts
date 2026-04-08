@@ -37,6 +37,14 @@ export interface PropagationJobResponse {
   message: string;
 }
 
+export interface ClearPropagatedFramesResponse {
+  success: boolean;
+  project_id: string;
+  frames_cleared: number;
+  masks_deleted: number;
+  message: string;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
@@ -120,6 +128,23 @@ export const useProjectsStore = defineStore('projects', {
             : err instanceof Error
               ? err.message
               : 'Failed to start propagation';
+        this.error = message;
+        return null;
+      }
+    },
+    async clearPropagatedFrames(projectId: string): Promise<ClearPropagatedFramesResponse | null> {
+      try {
+        const { data } = await api.delete<ClearPropagatedFramesResponse>(
+          `/projects/${projectId}/propagated-frames`,
+        );
+        return data ?? null;
+      } catch (err) {
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.detail
+            ? String(err.response.data.detail)
+            : err instanceof Error
+              ? err.message
+              : 'Failed to clear propagated frames';
         this.error = message;
         return null;
       }
