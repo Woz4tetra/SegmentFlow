@@ -142,6 +142,10 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
             """
             ALTER TABLE labels ADD COLUMN always_include BOOLEAN NOT NULL DEFAULT 0;
             """,
+            # Migration: add projects.desired_frame_rate if missing
+            """
+            ALTER TABLE projects ADD COLUMN desired_frame_rate FLOAT;
+            """,
         ]
         for migration in sqlite_migrations:
             try:
@@ -176,6 +180,19 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
                 WHERE table_name = 'labels' AND column_name = 'always_include'
             ) THEN
                 ALTER TABLE labels ADD COLUMN always_include BOOLEAN NOT NULL DEFAULT FALSE;
+            END IF;
+        END $$;
+        """,
+        # Migration: add projects.desired_frame_rate
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'projects' AND column_name = 'desired_frame_rate'
+            ) THEN
+                ALTER TABLE projects ADD COLUMN desired_frame_rate DOUBLE PRECISION;
             END IF;
         END $$;
         """,

@@ -60,6 +60,7 @@ def convert_video_to_jpegs(
     inference_dir: Path,
     output_width: int,
     inference_width: int,
+    desired_fps: float | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> bool:
     """Convert frames in [start_sec, end_sec] to JPEG files.
@@ -77,7 +78,8 @@ def convert_video_to_jpegs(
     """
     logger.info(f"Opening {video_path}")
     cap, info = _open_capture(video_path)
-    frame_indices = range(info.frame_count)
+    frame_indices = _build_sampled_frame_indices(info.frame_count, info.fps, desired_fps)
+    frame_set = set(frame_indices)
 
     saved = 0
     total = len(frame_indices) * 2
@@ -85,12 +87,14 @@ def convert_video_to_jpegs(
     logger.info(f"Converting to {total} images")
 
     try:
-        for idx in frame_indices:
+        for idx in range(info.frame_count):
             logger.debug(f"Read frame {idx}")
             success, frame = cap.read()
             if not success:
                 logger.error(f"Failed to extract frame index {idx}.")
                 break
+            if idx not in frame_set:
+                continue
             for width, base_dir in ((output_width, output_dir), (inference_width, inference_dir)):
                 image_out_path = base_dir / f"frame_{idx:06d}.jpg"
                 logger.debug(f"Saving to {image_out_path} with width {width}")
@@ -108,6 +112,38 @@ def convert_video_to_jpegs(
         progress_callback(total, total)
 
     return did_error_occur
+
+
+def _build_sampled_frame_indices(
+    frame_count: int,
+    source_fps: float,
+    desired_fps: float | None,
+) -> list[int]:
+    """Build source frame indices for extraction at desired fps."""
+    if frame_count <= 0:
+        return []
+    if desired_fps is None or source_fps <= 0:
+        return list(range(frame_count))
+
+    clamped_desired = max(1.0, min(float(desired_fps), float(source_fps)))
+    if clamped_desired >= source_fps:
+        return list(range(frame_count))
+
+    step = source_fps / clamped_desired
+    indices: list[int] = []
+    seen: set[int] = set()
+    pos = 0.0
+    while True:
+        idx = int(round(pos))
+        if idx >= frame_count:
+            break
+        if idx not in seen:
+            seen.add(idx)
+            indices.append(idx)
+        pos += step
+    if not indices:
+        indices.append(0)
+    return indices
 
 
 def generate_thumbnail(

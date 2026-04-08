@@ -61,7 +61,11 @@ async def import_brettzone_video(
             list(entry.robot_thumbnails.keys()),
         )
         project_name = payload.project_name or _derive_project_name(entry.fight_url, entry.camera)
-        project = Project(name=project_name, active=True)
+        project = Project(
+            name=project_name,
+            active=True,
+            desired_frame_rate=payload.desired_frame_rate,
+        )
         db.add(project)
         await db.flush()
         created_project_id = project.id
@@ -114,6 +118,7 @@ async def import_brettzone_video(
             project_dir=Path(settings.PROJECTS_ROOT_DIR) / str(saved_project.id),
             output_width=settings.OUTPUT_WIDTH,
             inference_width=settings.INFERENCE_WIDTH,
+            desired_frame_rate=saved_project.desired_frame_rate,
         )
 
         return BrettzoneImportResponse(
@@ -186,12 +191,20 @@ def _start_conversion_background(
     project_dir: Path,
     output_width: int,
     inference_width: int,
+    desired_frame_rate: float | None = None,
 ) -> None:
     project_id_str = str(project_id)
     conversion_progress[project_id_str] = {"saved": 0, "total": 0, "error": False}
     thread = threading.Thread(
         target=convert_video_task,
-        args=(project_id, video_path, project_dir, output_width, inference_width),
+        args=(
+            project_id,
+            video_path,
+            project_dir,
+            output_width,
+            inference_width,
+            desired_frame_rate,
+        ),
         daemon=True,
     )
     thread.start()

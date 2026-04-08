@@ -45,6 +45,7 @@ class Project(BaseModel):
     video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)
+    desired_frame_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     stage: Mapped[str] = mapped_column(
         String(50),
         default=ProjectStage.UPLOAD,

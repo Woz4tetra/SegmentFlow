@@ -95,7 +95,12 @@ async def complete_video_upload(
         # Start background conversion for full video JPEG extraction
         logger.info(f"Starting background conversion for project {project_id}")
         _start_conversion_background(
-            project_id, output_path, project_dir, output_width, inference_width
+            project_id,
+            output_path,
+            project_dir,
+            output_width,
+            inference_width,
+            db_project.desired_frame_rate,
         )
 
         return VideoUploadCompleteResponse(
@@ -133,6 +138,7 @@ def convert_video_task(
     project_dir: Path,
     output_width: int,
     inference_width: int,
+    desired_frame_rate: float | None = None,
 ) -> None:
     """Convert video to JPEGs and populate database with Image records.
 
@@ -158,6 +164,7 @@ def convert_video_task(
         inference_dir,
         output_width,
         inference_width,
+        desired_fps=desired_frame_rate,
         progress_callback=progress_cb,
     )
     conversion_progress[project_id_str]["error"] = did_error
@@ -246,6 +253,7 @@ def _start_conversion_background(
     project_dir: Path,
     output_width: int,
     inference_width: int,
+    desired_frame_rate: float | None = None,
 ) -> None:
     """Start video-to-JPEG conversion in background thread.
 
@@ -260,7 +268,14 @@ def _start_conversion_background(
     # Start conversion in background thread
     thread = threading.Thread(
         target=convert_video_task,
-        args=(project_id, video_path, project_dir, output_width, inference_width),
+        args=(
+            project_id,
+            video_path,
+            project_dir,
+            output_width,
+            inference_width,
+            desired_frame_rate,
+        ),
         daemon=True,
     )
     thread.start()

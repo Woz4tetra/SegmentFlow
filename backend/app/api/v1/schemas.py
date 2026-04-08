@@ -48,6 +48,11 @@ class ProjectUpdate(BaseModel):
     trim_start: float | None = Field(None, description="Start time for trimmed video in seconds")
     trim_end: float | None = Field(None, description="End time for trimmed video in seconds")
     video_path: str | None = Field(None, description="Path to uploaded video file")
+    desired_frame_rate: float | None = Field(
+        None,
+        ge=1.0,
+        description="Desired extracted frame rate (fps) for conversion",
+    )
     locked_by: str | None = Field(
         None,
         description="Client session ID that has locked this project",
@@ -101,6 +106,7 @@ class ProjectResponse(ProjectBase):
     video_path: str | None = None
     trim_start: float | None = None
     trim_end: float | None = None
+    desired_frame_rate: float | None = None
     stage: str
     locked_by: str | None = None
     created_at: datetime
@@ -302,6 +308,11 @@ class BrettzoneImportRequest(BaseModel):
     lucky: bool = Field(
         default=False,
         description="If true, ignore URL and import a random BrettZone video.",
+    )
+    desired_frame_rate: float | None = Field(
+        default=None,
+        ge=1.0,
+        description="Desired extracted frame rate (fps) for conversion",
     )
 
     @field_validator("brettzone_url")

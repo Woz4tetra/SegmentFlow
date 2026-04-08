@@ -9,6 +9,7 @@ import pytest
 
 from app.core.video_frames import (
     VideoInfo,
+    _build_sampled_frame_indices,
     _open_capture,
     _save_single_frame,
     convert_video_to_jpegs,
@@ -265,6 +266,40 @@ class TestConvertVideoToJpegs:
             assert mock_progress.call_count > 0
             # Capture should be released
             mock_cap.release.assert_called_once()
+
+    def test_convert_video_to_jpegs_respects_desired_fps(
+        self,
+        mock_video_path: Path,
+        output_dir: Path,
+        inference_dir: Path,
+    ) -> None:
+        """Test conversion downsampling based on desired fps."""
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_COUNT: 10,
+            cv2.CAP_PROP_FRAME_WIDTH: 640,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480,
+        }.get(prop, 0)
+
+        test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        mock_cap.read.return_value = (True, test_frame)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap), patch("cv2.imwrite") as mock_imwrite:
+            mock_imwrite.return_value = True
+            result = convert_video_to_jpegs(
+                mock_video_path,
+                output_dir,
+                inference_dir,
+                output_width=320,
+                inference_width=640,
+                desired_fps=10.0,
+            )
+
+            assert result is False
+            # 30fps source -> 10fps desired over 10 frames => 4 sampled frames, 2 writes each.
+            assert mock_imwrite.call_count == 8
 
     def test_convert_video_to_jpegs_read_failure(
         self,
@@ -534,3 +569,13 @@ class TestVideoInfo:
         assert info.frame_count == 1000
         assert info.width == 1920
         assert info.height == 1080
+
+
+class TestBuildSampledFrameIndices:
+    """Tests for frame sampling helper."""
+
+    def test_build_sampled_frame_indices_returns_all_when_unset(self) -> None:
+        assert _build_sampled_frame_indices(5, 30.0, None) == [0, 1, 2, 3, 4]
+
+    def test_build_sampled_frame_indices_downsamples(self) -> None:
+        assert _build_sampled_frame_indices(10, 30.0, 10.0) == [0, 3, 6, 9]

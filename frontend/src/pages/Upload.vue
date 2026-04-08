@@ -32,6 +32,38 @@
       <span>{{ errorMessage }}</span>
     </div>
     <div class="upload-card">
+      <div class="fps-controls">
+        <div class="fps-controls__header">
+          <h3>Desired Frame Rate</h3>
+          <span class="fps-value">{{ desiredFrameRate.toFixed(1) }} fps</span>
+        </div>
+        <p class="fps-help">
+          Conversion will use this frame rate. Values above the source video fps are capped automatically.
+        </p>
+        <div class="fps-controls__inputs">
+          <input
+            v-model.number="desiredFrameRate"
+            type="number"
+            class="fps-number"
+            :min="1"
+            :max="maxSelectableFps"
+            step="0.1"
+            :disabled="isBusy"
+            @change="clampDesiredFrameRate"
+          />
+          <input
+            v-model.number="desiredFrameRate"
+            type="range"
+            class="fps-slider"
+            :min="1"
+            :max="maxSelectableFps"
+            step="0.1"
+            :disabled="isBusy"
+            @input="clampDesiredFrameRate"
+          />
+        </div>
+        <p class="fps-range">Range: 1.0 - {{ maxSelectableFps.toFixed(1) }} fps</p>
+      </div>
       <FileUpload
         :disabled="isBusy"
         :is-uploading="isBusy"
@@ -87,6 +119,7 @@ interface Project {
   id: string;
   name: string;
   stage: string;
+  desired_frame_rate?: number | null;
   upload_visited: boolean;
   trim_visited: boolean;
   manual_labeling_visited: boolean;
@@ -106,6 +139,9 @@ const uploadProgress = ref(0);
 const uploadMessage = ref('');
 const errorMessage = ref('');
 const brettzoneUrl = ref('');
+const desiredFrameRate = ref(30);
+const maxSelectableFps = ref(60);
+const SOURCE_FPS_SENTINEL = 60;
 const conversionProgress = ref({ saved: 0, total: 0 });
 let conversionPollInterval: number | null = null;
 
@@ -125,9 +161,31 @@ async function fetchProject(): Promise<void> {
   try {
     const { data } = await api.get<Project>(`/projects/${routeProjectId}`);
     project.value = data;
+    if (data?.desired_frame_rate && data.desired_frame_rate >= 1) {
+      desiredFrameRate.value = data.desired_frame_rate;
+    }
   } catch (error) {
     console.error('Failed to fetch project:', error);
   }
+}
+
+function clampDesiredFrameRate(): void {
+  if (!Number.isFinite(desiredFrameRate.value)) {
+    desiredFrameRate.value = 1;
+    return;
+  }
+  desiredFrameRate.value = Math.max(1, Math.min(desiredFrameRate.value, maxSelectableFps.value));
+}
+
+async function persistDesiredFrameRate(projectId: string): Promise<void> {
+  clampDesiredFrameRate();
+  const desiredFrameRatePayload =
+    desiredFrameRate.value >= SOURCE_FPS_SENTINEL
+      ? null
+      : Number(desiredFrameRate.value.toFixed(3));
+  await api.patch(`/projects/${projectId}`, {
+    desired_frame_rate: desiredFrameRatePayload,
+  });
 }
 
 async function markStageVisited(): Promise<void> {
@@ -319,6 +377,7 @@ const handleFileSelect = async (file: File) => {
     if (routeProjectId && routeProjectId !== 'new') {
       // Existing project: upload video to this project
       console.log('Uploading to existing project:', routeProjectId);
+      await persistDesiredFrameRate(routeProjectId);
       await uploadVideoFile(routeProjectId, file);
       if (errorMessage.value.length === 0) {
         console.log('Video upload complete!');
@@ -334,6 +393,7 @@ const handleFileSelect = async (file: File) => {
       const created = await projectsStore.createProject(projectName, true);
       console.log('Project created:', created);
       if (created?.id) {
+        await persistDesiredFrameRate(created.id);
         console.log('Starting video upload...');
         await uploadVideoFile(created.id, file);
         if (errorMessage.value.length === 0) {
@@ -374,6 +434,10 @@ async function importFromBrettzone(lucky: boolean): Promise<void> {
     }>('/projects/import/brettzone', {
       brettzone_url: lucky ? null : brettzoneUrl.value,
       lucky,
+      desired_frame_rate:
+        desiredFrameRate.value >= SOURCE_FPS_SENTINEL
+          ? null
+          : Number(desiredFrameRate.value.toFixed(3)),
     });
 
     uploadProgress.value = 55;
@@ -479,6 +543,62 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
   background: var(--surface, #ffffff);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   transition: box-shadow var(--transition-duration, 0.2s) ease, background var(--transition-duration, 0.2s) ease, border-color var(--transition-duration, 0.2s) ease;
+}
+
+.fps-controls {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 12px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.fps-controls__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.fps-controls__header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.fps-value {
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+.fps-help {
+  margin: 0 0 0.6rem;
+  color: var(--muted, #4b5563);
+  font-size: 0.85rem;
+}
+
+.fps-controls__inputs {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.fps-number {
+  width: 110px;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.92rem;
+}
+
+.fps-slider {
+  flex: 1;
+}
+
+.fps-range {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted, #6b7280);
 }
 
 .content { 

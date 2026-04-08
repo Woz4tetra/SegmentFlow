@@ -17,6 +17,7 @@ export interface Project {
   video_path?: string | null;
   trim_start?: number | null;
   trim_end?: number | null;
+  desired_frame_rate?: number | null;
   stage: ProjectStage;
   locked_by?: string | null;
   created_at: string;
