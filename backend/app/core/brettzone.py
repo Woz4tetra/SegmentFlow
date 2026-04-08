@@ -42,6 +42,19 @@ class BrettzoneEntry:
     category: str
     robot_names: list[str] = field(default_factory=list)
     robot_thumbnails: dict[str, str] = field(default_factory=dict)
+    fight_start_sec: float | None = None
+    fight_end_sec: float | None = None
+
+
+_TIME_STRING_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?$")
+_START_KEY_HINT_RE = re.compile(
+    r"(?:^|_)(?:start|trimstart|startsec|starttime|inpoint|clipstart|fightstart)(?:$|_)",
+    re.IGNORECASE,
+)
+_END_KEY_HINT_RE = re.compile(
+    r"(?:^|_)(?:end|trimend|endsec|endtime|outpoint|clipend|fightend)(?:$|_)",
+    re.IGNORECASE,
+)
 
 
 def fetch_html(url: str, timeout: float = 20.0) -> str:
@@ -55,6 +68,128 @@ def fetch_html(url: str, timeout: float = 20.0) -> str:
     with urlopen(request, timeout=timeout) as response:
         content_type = response.headers.get_content_charset() or "utf-8"
         return response.read().decode(content_type, errors="replace")
+
+
+def _coerce_seconds(value: object) -> float | None:
+    """Coerce numeric/time-like values into seconds."""
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        return seconds if seconds >= 0 else None
+
+    if not isinstance(value, str):
+        return None
+
+    raw = value.strip()
+    if not raw:
+        return None
+
+    try:
+        seconds = float(raw)
+        if seconds >= 0:
+            return seconds
+    except ValueError:
+        pass
+
+    if not _TIME_STRING_RE.fullmatch(raw):
+        return None
+
+    parts = raw.split(":")
+    try:
+        if len(parts) == 2:
+            minutes = int(parts[0])
+            seconds = float(parts[1])
+            total = minutes * 60.0 + seconds
+        elif len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = float(parts[2])
+            total = hours * 3600.0 + minutes * 60.0 + seconds
+        else:
+            return None
+    except ValueError:
+        return None
+    return total if total >= 0 else None
+
+
+def _is_start_key(key: str) -> bool:
+    normalized = re.sub(r"[\-\s]+", "_", key.strip()).lower()
+    if "start" not in normalized and "inpoint" not in normalized:
+        return False
+    return bool(_START_KEY_HINT_RE.search(normalized))
+
+
+def _is_end_key(key: str) -> bool:
+    normalized = re.sub(r"[\-\s]+", "_", key.strip()).lower()
+    if "end" not in normalized and "outpoint" not in normalized:
+        return False
+    return bool(_END_KEY_HINT_RE.search(normalized))
+
+
+def _normalize_fight_bounds(start: float | None, end: float | None) -> tuple[float, float] | None:
+    if start is None or end is None:
+        return None
+    if start < 0 or end <= start:
+        return None
+    return float(start), float(end)
+
+
+def _pick_bounds_from_values(start_values: list[float], end_values: list[float]) -> tuple[float, float] | None:
+    if not start_values or not end_values:
+        return None
+    start = min(start_values)
+    end = max(end_values)
+    return _normalize_fight_bounds(start, end)
+
+
+def _extract_fight_bounds_from_recordings(recordings: list[dict]) -> tuple[float, float] | None:
+    start_values: list[float] = []
+    end_values: list[float] = []
+    for recording in recordings:
+        if not isinstance(recording, dict):
+            continue
+        for key, value in recording.items():
+            seconds = _coerce_seconds(value)
+            if seconds is None:
+                continue
+            if _is_start_key(str(key)):
+                start_values.append(seconds)
+            elif _is_end_key(str(key)):
+                end_values.append(seconds)
+    return _pick_bounds_from_values(start_values, end_values)
+
+
+def _extract_fight_bounds_from_match_data(html: str) -> tuple[float, float] | None:
+    block = _extract_match_data_block(html)
+    if not block:
+        return None
+
+    # Extract key-value primitives from a JS object block without requiring strict JSON.
+    token_re = re.compile(
+        r'(?:["\'](?P<qkey>[^"\']+)["\']|(?P<ukey>[A-Za-z_][A-Za-z0-9_]*))\s*:\s*'
+        r'(?:(?P<qval>"[^"]*"|\'[^\']*\')|(?P<nval>-?\d+(?:\.\d+)?))',
+        re.IGNORECASE,
+    )
+
+    start_values: list[float] = []
+    end_values: list[float] = []
+
+    for match in token_re.finditer(block):
+        key = (match.group("qkey") or match.group("ukey") or "").strip()
+        if not key:
+            continue
+
+        raw_value = match.group("qval") or match.group("nval") or ""
+        value = raw_value.strip().strip("'\"")
+        seconds = _coerce_seconds(value)
+        if seconds is None:
+            continue
+
+        if _is_start_key(key):
+            start_values.append(seconds)
+        elif _is_end_key(key):
+            end_values.append(seconds)
+
+    return _pick_bounds_from_values(start_values, end_values)
 
 
 def discover_fight_links(base_url: str, html: str) -> list[str]:
@@ -439,6 +574,11 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
         except (URLError, HTTPError, OSError):
             pass
     robot_names_list = sorted(robot_names)
+    fight_bounds = _extract_fight_bounds_from_recordings(recordings)
+    if fight_bounds is None:
+        fight_bounds = _extract_fight_bounds_from_match_data(html)
+    fight_start_sec = fight_bounds[0] if fight_bounds else None
+    fight_end_sec = fight_bounds[1] if fight_bounds else None
 
     for recording in recordings:
         media_url = recording.get("proxy720") or recording.get("proxy360") or recording.get("s3path")
@@ -455,6 +595,8 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
                 category=str(recording.get("category") or "unknown_category"),
                 robot_names=robot_names_list,
                 robot_thumbnails=dict(robot_thumbnails),
+                fight_start_sec=fight_start_sec,
+                fight_end_sec=fight_end_sec,
             )
         )
 
@@ -471,6 +613,8 @@ def list_downloadables(fight_url: str, timeout: float = 20.0) -> list[BrettzoneE
                 category="fallback",
                 robot_names=robot_names_list,
                 robot_thumbnails=dict(robot_thumbnails),
+                fight_start_sec=fight_start_sec,
+                fight_end_sec=fight_end_sec,
             )
         )
     return entries

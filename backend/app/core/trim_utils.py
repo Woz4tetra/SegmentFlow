@@ -32,3 +32,32 @@ def is_frame_in_trim(project: Project, frame_number: int) -> bool:
         return True
     start_frame, end_frame = bounds
     return start_frame <= frame_number <= end_frame
+
+
+def resolve_import_trim_bounds(
+    video_path: Path,
+    metadata_start_sec: float | None = None,
+    metadata_end_sec: float | None = None,
+) -> tuple[float, float] | None:
+    """Resolve trim bounds using metadata, falling back to full video duration.
+
+    Returns:
+        (trim_start, trim_end) in seconds, or None when duration is invalid.
+    """
+    info = get_video_info(video_path)
+    duration = (info.frame_count / info.fps) if info.fps > 0 else 0.0
+    if duration <= 0:
+        return None
+
+    if (
+        metadata_start_sec is not None
+        and metadata_end_sec is not None
+        and metadata_start_sec >= 0
+        and metadata_end_sec > metadata_start_sec
+    ):
+        start = min(float(metadata_start_sec), duration)
+        end = min(float(metadata_end_sec), duration)
+        if end > start:
+            return (start, end)
+
+    return (0.0, float(duration))

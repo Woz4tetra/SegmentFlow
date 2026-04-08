@@ -3,11 +3,13 @@
 import pytest
 
 from app.core.brettzone import (
+    _extract_fight_bounds_from_match_data,
     _extract_robot_names_from_match_data,
     _extract_robot_thumbnails_from_match_data,
     _is_valid_robot_name,
     list_downloadables,
 )
+from app.core.trim_utils import resolve_import_trim_bounds
 
 
 def test_robot_name_validation_accepts_real_names() -> None:
@@ -262,4 +264,99 @@ def test_list_downloadables_extracts_robot_thumbnails(monkeypatch: pytest.Monkey
         "Big Dill": "https://nhrl.io/media/big-dill.jpg",
         "Riptide": "https://nhrl.io/media/riptide.jpg",
     }
+
+
+def test_extract_fight_bounds_from_match_data_seconds() -> None:
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        clipStart: 42.5,
+        clipEnd: 178.25,
+        gameID: "EX-123"
+      };
+    </script>
+    """
+    assert _extract_fight_bounds_from_match_data(sample_html) == (42.5, 178.25)
+
+
+def test_extract_fight_bounds_from_match_data_time_strings() -> None:
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        "trim_start": "00:15",
+        "trim_end": "03:00",
+        "gameID": "EX-123"
+      };
+    </script>
+    """
+    assert _extract_fight_bounds_from_match_data(sample_html) == (15.0, 180.0)
+
+
+def test_list_downloadables_carries_fight_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample_html = """
+    <script>
+      window.MATCH_DATA = {
+        recordings: [
+          {
+            "proxy720":"https://cdn.example.com/a.mp4",
+            "camera":"Cage 2 Overhead High",
+            "category":"overhead",
+            "clipStart":"00:12",
+            "clipEnd":"02:58"
+          }
+        ],
+        gameID: "123"
+      };
+    </script>
+    """
+    monkeypatch.setattr("app.core.brettzone.fetch_html", lambda url, timeout=20.0: sample_html)
+    entries = list_downloadables("https://brettzone.net/fightReviewSync.php?gameID=1&tournamentID=2")
+    assert len(entries) == 1
+    assert entries[0].fight_start_sec == 12.0
+    assert entries[0].fight_end_sec == 178.0
+
+
+def test_resolve_trim_bounds_uses_fight_bounds_when_valid(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    class FakeVideoInfo:
+        fps = 30.0
+        frame_count = 9000
+
+    monkeypatch.setattr(
+        "app.core.trim_utils.get_video_info",
+        lambda _path: FakeVideoInfo(),
+    )
+    bounds = resolve_import_trim_bounds(tmp_path / "video.mp4", 10.0, 20.0)
+    assert bounds == (10.0, 20.0)
+
+
+def test_resolve_trim_bounds_falls_back_to_full_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    class FakeVideoInfo:
+        fps = 25.0
+        frame_count = 500
+
+    monkeypatch.setattr(
+        "app.core.trim_utils.get_video_info",
+        lambda _path: FakeVideoInfo(),
+    )
+    bounds = resolve_import_trim_bounds(tmp_path / "video.mp4")
+    assert bounds == (0.0, 20.0)
+
+
+def test_resolve_trim_bounds_falls_back_when_invalid_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    class FakeVideoInfo:
+        fps = 25.0
+        frame_count = 500
+
+    monkeypatch.setattr(
+        "app.core.trim_utils.get_video_info",
+        lambda _path: FakeVideoInfo(),
+    )
+    bounds = resolve_import_trim_bounds(tmp_path / "video.mp4", 30.0, 20.0)
+    assert bounds == (0.0, 20.0)
 

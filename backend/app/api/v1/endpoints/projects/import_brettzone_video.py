@@ -19,6 +19,7 @@ from app.core.brettzone import discover_entry_from_url, discover_random_entry, d
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.trim_utils import resolve_import_trim_bounds
 from app.models.label import Label
 from app.models.project import Project, ProjectStage
 from app.models.project_label_setting import ProjectLabelSetting
@@ -76,12 +77,29 @@ async def import_brettzone_video(
 
         output_path = _project_video_path(project.id, entry.media_url)
         file_size = await asyncio.to_thread(download_video, entry.media_url, output_path)
+        try:
+            trim_bounds = await asyncio.to_thread(
+                resolve_import_trim_bounds,
+                output_path,
+                entry.fight_start_sec,
+                entry.fight_end_sec,
+            )
+        except Exception as exc:
+            logger.warning("Could not resolve BrettZone trim defaults for %s: %s", output_path, exc)
+            trim_bounds = None
 
         # Avoid stale ORM instance updates by writing directly by primary key.
+        update_values = {
+            "video_path": str(output_path),
+            "stage": ProjectStage.TRIM.value,
+        }
+        if trim_bounds is not None:
+            update_values["trim_start"] = trim_bounds[0]
+            update_values["trim_end"] = trim_bounds[1]
         update_result = await db.execute(
             update(Project)
             .where(Project.id == project.id)
-            .values(video_path=str(output_path), stage=ProjectStage.TRIM.value)
+            .values(**update_values)
         )
         if update_result.rowcount != 1:
             raise RuntimeError(f"Project update failed for id={project.id}: rowcount={update_result.rowcount}")
@@ -158,6 +176,8 @@ def _project_video_path(project_id: UUID, media_url: str) -> Path:
     if ext not in {".mp4", ".mov", ".avi"}:
         ext = ".mp4"
     return videos_dir / f"original{ext}"
+
+
 
 
 def _start_conversion_background(
