@@ -233,13 +233,13 @@ def _is_frame_eligible(
     source_updated_at: datetime | None,
     mask_updated_at: datetime | None,
 ) -> bool:
+    # Unlabeled frames are always candidates.
     if not has_masks:
         return True
-    if img.validation != ValidationStatus.FAILED.value:
-        return False
-    if not source_updated_at or not mask_updated_at:
-        return False
-    return source_updated_at > mask_updated_at
+    # Explicit validation failure means user requested repropagation.
+    if img.validation == ValidationStatus.FAILED.value:
+        return True
+    return False
 
 
 def build_propagation_segments(
