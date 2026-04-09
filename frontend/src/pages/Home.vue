@@ -414,6 +414,10 @@ const bulkActions: { key: BulkAction; label: string }[] = [
   { key: 'export_segmask', label: 'Export Segmentation Masks' },
 ];
 
+function actionLabel(action: BulkAction): string {
+  return bulkActions.find((item) => item.key === action)?.label ?? action;
+}
+
 function triggerDownload(url: string): void {
   const link = document.createElement('a');
   link.href = url;
@@ -428,6 +432,11 @@ function triggerDownload(url: string): void {
 async function runBulkAction(action: BulkAction): Promise<void> {
   bulkDropdownOpen.value = false;
   if (selectedIds.value.size === 0 || bulkBusy.value) return;
+  const selectedCountValue = selectedIds.value.size;
+  const confirmed = window.confirm(
+    `Are you sure you want to run "${actionLabel(action)}" on ${selectedCountValue} selected project${selectedCountValue === 1 ? '' : 's'}?`,
+  );
+  if (!confirmed) return;
   bulkBusy.value = true;
   bulkResultMessage.value = '';
 
