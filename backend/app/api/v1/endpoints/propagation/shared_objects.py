@@ -87,14 +87,15 @@ async def launch_next_propagation_job() -> None:
     _track_background_task(task)
 
 
-def mask_to_contour(mask: np.ndarray) -> tuple[list[list[float]], float]:
-    """Convert a binary mask to a contour polygon and calculate area.
+def mask_to_contour(mask: np.ndarray) -> tuple[Any, float]:
+    """Convert a binary mask to filtered top contours and calculate area.
 
     Args:
         mask: Binary mask array (2D or 3D boolean or uint8). Extra dimensions are squeezed.
 
     Returns:
-        Tuple of (contour_polygon, area) where contour_polygon is [[x, y], ...]
+        Tuple of (contour_polygon, area). contour_polygon is saved in
+        multi-contour JSON format: {"contours": [[[x, y], ...], ...], "hierarchy": ...}
     """
     # Squeeze extra dimensions (SAM3 may return masks with shape (1, H, W) or (H, W))
     mask_2d = np.squeeze(mask)
@@ -113,20 +114,38 @@ def mask_to_contour(mask: np.ndarray) -> tuple[list[list[float]], float]:
     # Ensure contiguous memory layout for OpenCV
     mask_uint8 = np.ascontiguousarray(mask_uint8)
 
-    # Find contours
+    # Find external contours for disconnected components.
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return [], 0.0
 
-    # Get the largest contour
-    largest_contour = max(contours, key=cv2.contourArea)
-    area = float(cv2.contourArea(largest_contour))
+    min_area = float(settings.MIN_CONTOUR_AREA_PX)
+    max_contours = max(1, int(settings.MAX_PROPAGATION_CONTOURS))
 
-    # Convert to list of [x, y] coordinates
-    contour_polygon = [[float(pt[0][0]), float(pt[0][1])] for pt in largest_contour]
+    contours_with_area: list[tuple[np.ndarray, float]] = []
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area >= min_area:
+            contours_with_area.append((contour, area))
 
-    return contour_polygon, area
+    if not contours_with_area:
+        return [], 0.0
+
+    contours_with_area.sort(key=lambda item: item[1], reverse=True)
+    kept = contours_with_area[:max_contours]
+    total_area = float(sum(area for _, area in kept))
+
+    contour_payload: list[list[list[float]]] = []
+    hierarchy_payload: list[list[int]] = []
+    for idx, (contour, _area) in enumerate(kept):
+        contour_payload.append([[float(pt[0][0]), float(pt[0][1])] for pt in contour])
+        next_idx = idx + 1 if idx < len(kept) - 1 else -1
+        prev_idx = idx - 1 if idx > 0 else -1
+        # External contours only; no parent/child relations.
+        hierarchy_payload.append([next_idx, prev_idx, -1, -1])
+
+    return {"contours": contour_payload, "hierarchy": hierarchy_payload}, total_area
 
 
 async def get_labeled_frames(

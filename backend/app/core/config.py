@@ -94,6 +94,14 @@ class Settings:
     def BIG_JUMP_SIZE(self) -> int:  # noqa: N802
         return self.config.processing.big_jump_size
 
+    @property
+    def MIN_CONTOUR_AREA_PX(self) -> float:  # noqa: N802
+        return self.config.processing.min_contour_area_px
+
+    @property
+    def MAX_PROPAGATION_CONTOURS(self) -> int:  # noqa: N802
+        return self.config.processing.max_propagation_contours
+
     def get_database_url(self) -> str:
         """Return the effective database URL.
 

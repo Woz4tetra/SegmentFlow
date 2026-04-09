@@ -128,6 +128,8 @@ class ProcessingConfig:
         output_width: Width for output images
         mask_transparency: Transparency level for mask overlays (0.0-1.0)
         big_jump_size: Number of frames for big jump navigation
+        min_contour_area_px: Minimum contour area (pixels) to keep in propagated masks
+        max_propagation_contours: Maximum number of propagated contours to persist per mask
     """
 
     max_propagation_length: int = 1000
@@ -135,6 +137,8 @@ class ProcessingConfig:
     output_width: int = 1920
     mask_transparency: float = 0.5
     big_jump_size: int = 1000
+    min_contour_area_px: float = 30.0
+    max_propagation_contours: int = 5
 
 
 @dataclass
