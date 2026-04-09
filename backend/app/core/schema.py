@@ -132,7 +132,7 @@ class ProcessingConfig:
         max_propagation_contours: Maximum number of propagated contours to persist per mask
     """
 
-    max_propagation_length: int = 1000
+    max_propagation_length: int = 1100
     inference_width: int = 1024
     output_width: int = 1920
     mask_transparency: float = 0.5
