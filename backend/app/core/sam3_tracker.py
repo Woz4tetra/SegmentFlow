@@ -63,6 +63,8 @@ class SAM3Tracker:
         # Image folder info (loaded lazily)
         self.images_dir: Path | None = None
         self.image_files: list[Path] = []  # Sorted list of image paths
+        self.frame_numbers: list[int] = []  # External frame numbers aligned with image_files
+        self.frame_number_to_index: dict[int, int] = {}
         self.image_width: int = 0
         self.image_height: int = 0
         self.total_frames: int = 0
@@ -215,11 +217,18 @@ class SAM3Tracker:
 
         # Natural sort to handle numeric naming correctly
         self.image_files = natsorted(self.image_files, key=lambda p: p.name)
+        self.frame_numbers = []
+        self.frame_number_to_index = {}
 
         if not self.image_files:
             raise ValueError(f"No images found in: {images_dir}")
 
         self.total_frames = len(self.image_files)
+        for idx, image_path in enumerate(self.image_files):
+            frame_number = self._extract_frame_number_from_path(image_path, idx)
+            self.frame_numbers.append(frame_number)
+            # Keep first occurrence if duplicate numbers exist.
+            self.frame_number_to_index.setdefault(frame_number, idx)
 
         # Load first image to get dimensions
         first_image = cv2.imread(str(self.image_files[0]))
@@ -252,6 +261,31 @@ class SAM3Tracker:
         # called outside the inference lock. Cleanup is handled safely in:
         # 1. _prepare_frames_for_propagation() - cleans old dir after new one is created
         # 2. End of inference methods (get_preview_mask, etc.) - cleans up after use
+
+    def _extract_frame_number_from_path(self, image_path: Path, fallback: int) -> int:
+        """Extract frame number from filename, falling back to sequential index."""
+        stem = image_path.stem
+        if stem.startswith("frame_"):
+            numeric = stem[6:]
+            if numeric.isdigit():
+                return int(numeric)
+        if stem.isdigit():
+            return int(stem)
+        return fallback
+
+    def resolve_frame_index(self, frame_number: int) -> int:
+        """Resolve external frame number to sequential index for SAM internals."""
+        if frame_number in self.frame_number_to_index:
+            return self.frame_number_to_index[frame_number]
+        if 0 <= frame_number < self.total_frames:
+            return frame_number
+        raise ValueError(f"Frame index {frame_number} out of range (total: {self.total_frames})")
+
+    def resolve_frame_number(self, frame_index: int) -> int:
+        """Resolve sequential SAM frame index back to external frame number."""
+        if 0 <= frame_index < len(self.frame_numbers):
+            return self.frame_numbers[frame_index]
+        return frame_index
 
     def _cleanup_temp_dir(self) -> None:
         """Clean up temporary frame directory."""
@@ -652,11 +686,13 @@ class SAM3Tracker:
 
         # Use inference lock to prevent race conditions
         with self._inference_lock:
+            source_frame_idx = self.resolve_frame_index(source_frame)
+
             # Clamp propagate_length to not exceed available frames
-            max_frames = min(propagate_length, self.total_frames - source_frame)
+            max_frames = min(propagate_length, self.total_frames - source_frame_idx)
 
             # Prepare frames in temp directory
-            frames_dir = self._prepare_frames_for_propagation(source_frame, max_frames)
+            frames_dir = self._prepare_frames_for_propagation(source_frame_idx, max_frames)
 
             # Initialize inference state with prepared frames
             self._init_inference_state(frames_dir)
@@ -674,8 +710,9 @@ class SAM3Tracker:
                     )
 
             if additional_points_by_frame:
-                for frame_idx, frame_points in additional_points_by_frame.items():
-                    local_frame_idx = frame_idx - source_frame
+                for frame_number, frame_points in additional_points_by_frame.items():
+                    resolved_frame_idx = self.resolve_frame_index(frame_number)
+                    local_frame_idx = resolved_frame_idx - source_frame_idx
                     if local_frame_idx < 0 or local_frame_idx >= max_frames:
                         continue
                     for obj_id, (points, labels) in frame_points.items():
@@ -706,18 +743,19 @@ class SAM3Tracker:
                     propagate_preflight=True,
                 ):
                     # Convert local frame index back to original video frame index
-                    original_frame_idx = source_frame + local_frame_idx
+                    original_frame_idx = source_frame_idx + local_frame_idx
+                    original_frame_number = self.resolve_frame_number(original_frame_idx)
 
                     # Scale masks to original resolution
-                    video_segments[original_frame_idx] = {}
+                    video_segments[original_frame_number] = {}
                     for i, out_obj_id in enumerate(obj_ids):
                         mask = (video_res_masks[i] > 0.0).cpu().numpy()
                         scaled_mask = self._scale_mask_to_original(mask)
-                        video_segments[original_frame_idx][out_obj_id] = scaled_mask
+                        video_segments[original_frame_number][out_obj_id] = scaled_mask
 
                     if callback:
                         progress = (local_frame_idx + 1) / max_frames
-                        callback(original_frame_idx, progress)
+                        callback(original_frame_number, progress)
 
             # Copy original frames before cleanup
             original_frames = dict(self._original_frames)
@@ -764,15 +802,17 @@ class SAM3Tracker:
         # Use inference lock to prevent race conditions where a new request
         # deletes temp files while a previous request's SAM3 init_state is still loading
         with self._inference_lock:
+            resolved_frame_idx = self.resolve_frame_index(frame_idx)
             # For single-frame inference, prepare ONLY the target frame
             # We'll create 3 copies of the same frame to satisfy SAM3's init_state requirements
             # This ensures we always have exactly 3 frames (no gaps) and only use frame 1
-            start = frame_idx
+            start = resolved_frame_idx
             num_frames = 1  # Only prepare the target frame
             local_idx = 0  # Target frame will be at index 0
 
             logger.debug(
-                f"Preparing single frame {frame_idx} for preview (will duplicate to satisfy SAM3)"
+                f"Preparing single frame {frame_idx} (resolved={resolved_frame_idx}) for preview "
+                "(will duplicate to satisfy SAM3)"
             )
             frames_dir = self._prepare_frames_for_propagation(start, num_frames)
 
@@ -894,13 +934,12 @@ class SAM3Tracker:
         if self.images_dir is None:
             raise RuntimeError("No images directory set. Call set_images_dir() first.")
 
-        if frame_idx >= self.total_frames:
-            raise ValueError(f"Frame index {frame_idx} out of range (total: {self.total_frames})")
+        resolved_frame_idx = self.resolve_frame_index(frame_idx)
 
         # Use get_preview_mask which is designed for single-frame inference
         # It handles frame context loading and inference state setup properly
         return self.get_preview_mask(
-            frame_idx=frame_idx,
+            frame_idx=resolved_frame_idx,
             obj_id=obj_id,
             points=points,
             labels=labels,
