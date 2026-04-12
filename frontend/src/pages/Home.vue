@@ -405,12 +405,18 @@ function toggleSelectAll(): void {
   if (allSelected.value) deselectAll(); else selectAll();
 }
 
-type BulkAction = 'export_yolo' | 'export_segmask' | 'start_propagation' | 'clear_propagated_frames';
+type BulkAction =
+  | 'export_yolo'
+  | 'export_yolo_seg'
+  | 'export_segmask'
+  | 'start_propagation'
+  | 'clear_propagated_frames';
 
 const bulkActions: { key: BulkAction; label: string }[] = [
   { key: 'start_propagation', label: 'Start Propagation' },
   { key: 'clear_propagated_frames', label: 'Clear Propagated Frames' },
   { key: 'export_yolo', label: 'Export YOLO' },
+  { key: 'export_yolo_seg', label: 'Export YOLO Segmentation' },
   { key: 'export_segmask', label: 'Export Segmentation Masks' },
 ];
 
@@ -495,7 +501,12 @@ async function runBulkAction(action: BulkAction): Promise<void> {
     const skipParam = userSettingsStore.export_skip_n > 1
       ? `?skip_n=${userSettingsStore.export_skip_n}`
       : '';
-    const pathSegment = action === 'export_yolo' ? 'yolo' : 'segmask';
+    const pathSegment =
+      action === 'export_yolo'
+        ? 'yolo'
+        : action === 'export_yolo_seg'
+          ? 'yolo-seg'
+          : 'segmask';
 
     for (let i = 0; i < ids.length; i++) {
       triggerDownload(buildApiUrl(`/projects/${ids[i]}/export/${pathSegment}${skipParam}`));
