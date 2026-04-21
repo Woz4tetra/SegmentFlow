@@ -239,6 +239,10 @@ def _is_frame_eligible(
     # Explicit validation failure means user requested repropagation.
     if img.validation == ValidationStatus.FAILED.value:
         return True
+    # Repropagate if masks are older than the source annotations.
+    # This keeps propagation in sync after users update a source frame.
+    if source_updated_at and (mask_updated_at is None or source_updated_at > mask_updated_at):
+        return True
     return False
 
 
