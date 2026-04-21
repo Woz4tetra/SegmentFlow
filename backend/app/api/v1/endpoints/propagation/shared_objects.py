@@ -248,12 +248,12 @@ def _is_frame_eligible(
 
 def build_propagation_segments(
     images_by_frame: dict[int, Image],
+    frame_numbers: list[int],
     labeled_frame_numbers: list[int],
     max_propagation_length: int,
     has_mask_by_frame: dict[int, bool],
     source_updated_by_frame: dict[int, datetime],
     mask_updated_by_frame: dict[int, datetime],
-    max_frame: int,
 ) -> list[PropagationSegment]:
     """Build propagation segments from labeled frames with filtering rules.
 
@@ -263,36 +263,74 @@ def build_propagation_segments(
     Args:
         images_by_frame: Map of frame number to Image
         labeled_frame_numbers: Sorted list of labeled frame numbers
+        frame_numbers: Ordered frame numbers available for propagation
         max_propagation_length: Maximum frames per segment
         has_mask_by_frame: Map of frame number to mask presence
-        max_frame: Maximum frame number in project
 
     Returns:
         List of PropagationSegment objects
     """
     segments: list[PropagationSegment] = []
+    frame_index_by_number = {frame_number: idx for idx, frame_number in enumerate(frame_numbers)}
 
     for i, labeled_frame in enumerate(labeled_frame_numbers):
+        labeled_idx = frame_index_by_number.get(labeled_frame)
+        if labeled_idx is None:
+            continue
         interval_anchor_frame: int | None = None
         if i < len(labeled_frame_numbers) - 1:
             next_labeled = labeled_frame_numbers[i + 1]
-            end_frame = min(labeled_frame + max_propagation_length, next_labeled - 1)
+            next_labeled_idx = frame_index_by_number.get(next_labeled)
+            if next_labeled_idx is None:
+                continue
+            end_idx = min(labeled_idx + max_propagation_length, next_labeled_idx - 1)
             if (
-                end_frame == next_labeled - 1
-                and (next_labeled - labeled_frame) <= settings.BIG_JUMP_SIZE + 1
+                end_idx == next_labeled_idx - 1
+                and (next_labeled_idx - labeled_idx) <= settings.BIG_JUMP_SIZE + 1
             ):
                 interval_anchor_frame = next_labeled
         else:
-            end_frame = min(labeled_frame + max_propagation_length, max_frame)
+            end_idx = min(labeled_idx + max_propagation_length, len(frame_numbers) - 1)
 
-        if end_frame <= labeled_frame:
+        if end_idx <= labeled_idx:
             continue
 
-        eligible_frames: list[int] = []
+        candidate_frames = frame_numbers[labeled_idx + 1 : end_idx + 1]
+        if not candidate_frames:
+            continue
+
+        range_end_frame = candidate_frames[-1]
         source_updated_at = source_updated_by_frame.get(labeled_frame)
-        for frame in range(labeled_frame + 1, end_frame + 1):
+        current_start: int | None = None
+        current_end: int | None = None
+        current_count = 0
+
+        def flush_segment() -> None:
+            nonlocal current_start, current_end, current_count
+            if current_start is None or current_end is None or current_count <= 0:
+                current_start = None
+                current_end = None
+                current_count = 0
+                return
+            segment_anchor_frame = interval_anchor_frame if current_end == range_end_frame else None
+            segments.append(
+                PropagationSegment(
+                    start_frame=current_start,
+                    end_frame=current_end,
+                    source_frame=labeled_frame,
+                    anchor_frame=segment_anchor_frame,
+                    direction="forward",
+                    num_frames=current_count,
+                )
+            )
+            current_start = None
+            current_end = None
+            current_count = 0
+
+        for frame in candidate_frames:
             img = images_by_frame.get(frame)
             if not img or img.manually_labeled:
+                flush_segment()
                 continue
             has_masks = has_mask_by_frame.get(frame, False)
             if _is_frame_eligible(
@@ -301,44 +339,17 @@ def build_propagation_segments(
                 source_updated_at,
                 mask_updated_by_frame.get(frame),
             ):
-                eligible_frames.append(frame)
+                if current_start is None:
+                    current_start = frame
+                    current_end = frame
+                    current_count = 1
+                else:
+                    current_end = frame
+                    current_count += 1
+            else:
+                flush_segment()
 
-        if not eligible_frames:
-            continue
-
-        start_frame = eligible_frames[0]
-        prev_frame = eligible_frames[0]
-        for frame in eligible_frames[1:]:
-            if frame == prev_frame + 1:
-                prev_frame = frame
-                continue
-            segment_anchor_frame = (
-                interval_anchor_frame if prev_frame == end_frame else None
-            )
-            segments.append(
-                PropagationSegment(
-                    start_frame=start_frame,
-                    end_frame=prev_frame,
-                    source_frame=labeled_frame,
-                    anchor_frame=segment_anchor_frame,
-                    direction="forward",
-                    num_frames=prev_frame - start_frame + 1,
-                )
-            )
-            start_frame = frame
-            prev_frame = frame
-
-        segment_anchor_frame = interval_anchor_frame if prev_frame == end_frame else None
-        segments.append(
-                PropagationSegment(
-                        start_frame=start_frame,
-                end_frame=prev_frame,
-                        source_frame=labeled_frame,
-                        anchor_frame=segment_anchor_frame,
-                direction="forward",
-                num_frames=prev_frame - start_frame + 1,
-                    )
-                )
+        flush_segment()
 
     return segments
 
@@ -386,10 +397,6 @@ async def analyze_propagation_segments(
     if len(labeled_frame_numbers) < 1:
         return [], []
 
-    # Get frame boundaries
-    all_frame_numbers = [img.frame_number for img in images]
-    max_frame = max(all_frame_numbers)
-
     # Build source frames data
     source_frames_data = await build_source_frames_data(labeled_frame_numbers, labeled_images, db)
 
@@ -422,12 +429,12 @@ async def analyze_propagation_segments(
     labeled_frame_numbers.sort()
     segments = build_propagation_segments(
         images_by_frame,
+        [img.frame_number for img in images],
         labeled_frame_numbers,
         max_propagation_length,
         has_mask_by_frame,
         source_updated_by_frame,
         mask_updated_by_frame,
-        max_frame,
     )
 
     return segments, source_frames_data
@@ -648,9 +655,27 @@ async def process_segment(
         target_end_frame = segment.anchor_frame
 
     if segment.direction == "forward":
-        propagate_length = target_end_frame - segment.source_frame + 1
+        source_idx = tracker.resolve_frame_index(segment.source_frame)
+        target_end_idx = tracker.resolve_frame_index(target_end_frame)
+        if target_end_idx < source_idx:
+            logger.warning(
+                "Invalid forward segment ordering: source=%s end=%s",
+                segment.source_frame,
+                target_end_frame,
+            )
+            return
+        propagate_length = (target_end_idx - source_idx) + 1
     else:
-        propagate_length = segment.source_frame - segment.start_frame + 1
+        source_idx = tracker.resolve_frame_index(segment.source_frame)
+        target_start_idx = tracker.resolve_frame_index(segment.start_frame)
+        if source_idx < target_start_idx:
+            logger.warning(
+                "Invalid backward segment ordering: source=%s start=%s",
+                segment.source_frame,
+                segment.start_frame,
+            )
+            return
+        propagate_length = (source_idx - target_start_idx) + 1
 
     # Get event loop before creating callback (needed for thread-safe scheduling)
     loop = asyncio.get_event_loop()
@@ -695,6 +720,7 @@ async def process_segment(
         frame_idx: obj_masks
         for frame_idx, obj_masks in video_segments.items()
         if frame_idx not in skip_frames
+        and segment.start_frame <= frame_idx <= segment.end_frame
     }
     async for db in db_factory():
         await save_segment_masks(
