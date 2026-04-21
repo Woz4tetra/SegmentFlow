@@ -64,6 +64,18 @@
             />
 
             <p class="hint" v-if="validationError">{{ validationError }}</p>
+            <p class="hint" v-if="originalDownloadError">{{ originalDownloadError }}</p>
+
+            <div class="utility-actions">
+              <button
+                class="ghost"
+                type="button"
+                :disabled="downloadingOriginal || !project"
+                @click="downloadOriginalView"
+              >
+                {{ downloadingOriginal ? 'Preparing…' : 'Download Original View' }}
+              </button>
+            </div>
 
             <div class="actions">
               <button 
@@ -232,6 +244,8 @@ const labelFilter = ref<LabelFilter>('all');
 const patchError = ref('');
 const labelPatchInFlight = ref<Record<string, boolean>>({});
 const brokenThumbnailIds = ref<Record<string, boolean>>({});
+const downloadingOriginal = ref(false);
+const originalDownloadError = ref('');
 const filterOptions: Array<{ value: LabelFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'enabled', label: 'Enabled' },
@@ -269,6 +283,40 @@ function formatTime(sec: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${r.toFixed(1).padStart(4, '0')}`;
+}
+
+function toDownloadName(projectName: string): string {
+  const cleaned = projectName
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
+    .replace(/\.+$/g, '');
+  return cleaned || 'project';
+}
+
+async function downloadOriginalView(): Promise<void> {
+  if (downloadingOriginal.value || !project.value) return;
+  downloadingOriginal.value = true;
+  originalDownloadError.value = '';
+  try {
+    const { data } = await api.get<Blob>(`/projects/${projectId}/original_video`, {
+      responseType: 'blob',
+    });
+    const blobUrl = URL.createObjectURL(data);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `${toDownloadName(project.value.name)}.mp4`;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error('Failed to download original video:', error);
+    originalDownloadError.value = 'Failed to download original video. Please try again.';
+  } finally {
+    downloadingOriginal.value = false;
+  }
 }
 
 function validate(): string | '' {
@@ -548,6 +596,7 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .controls { display: flex; flex-direction: column; gap: 1rem; }
 .time-labels { display: flex; justify-content: space-between; color: var(--text, #0f172a); font-size: 0.95rem; }
 .time-labels strong { font-weight: 700; }
+.utility-actions { display: flex; justify-content: flex-end; }
 .actions { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
 .primary { background: var(--accent, #2563eb); color: white; border: none; padding: 0.6rem 1rem; border-radius: 12px; cursor: pointer; font-weight: 600; }
 .primary.large { width: 100%; padding: 1rem 1.5rem; font-size: 1.1rem; }

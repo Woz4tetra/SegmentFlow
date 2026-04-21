@@ -13,6 +13,7 @@ from .get_frame_image import get_frame_image
 from .get_frame_statuses import get_frame_statuses
 from .get_labeled_points import get_labeled_points
 from .get_masks import get_masks
+from .get_original_video import get_original_video
 from .get_project import get_project
 from .get_thumbnail import get_thumbnail
 from .get_upload_progress import get_upload_progress
@@ -48,6 +49,7 @@ __all__ = [
     "get_frame_statuses",
     "get_labeled_points",
     "get_masks",
+    "get_original_video",
     "get_project",
     "get_thumbnail",
     "get_upload_progress",
