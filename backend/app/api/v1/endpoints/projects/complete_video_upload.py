@@ -14,6 +14,7 @@ from app.api.v1.endpoints.projects.shared_objects import (
 )
 from app.api.v1.schemas import VideoUploadCompleteResponse
 from app.core.config import settings
+from app.core.crop_utils import CropRect, get_project_crop
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.video_frames import convert_video_to_jpegs, generate_thumbnail
@@ -94,13 +95,14 @@ async def complete_video_upload(
         )
         # Start background conversion for full video JPEG extraction
         logger.info(f"Starting background conversion for project {project_id}")
-        _start_conversion_background(
+        start_conversion_background(
             project_id,
             output_path,
             project_dir,
             output_width,
             inference_width,
             db_project.desired_frame_rate,
+            get_project_crop(db_project),
         )
 
         return VideoUploadCompleteResponse(
@@ -132,6 +134,20 @@ async def complete_video_upload(
         ) from e
 
 
+def _remove_existing_frames(*frame_dirs: Path) -> None:
+    """Delete previously extracted frame JPEGs from the given directories.
+
+    Args:
+        frame_dirs: Directories holding frame_NNNNNN.jpg files
+    """
+    for frame_dir in frame_dirs:
+        for frame_file in frame_dir.glob("frame_*.jpg"):
+            try:
+                frame_file.unlink()
+            except OSError as e:
+                logger.warning(f"[BG] Failed to remove stale frame {frame_file}: {e}")
+
+
 def convert_video_task(
     project_id: UUID,
     video_path: Path,
@@ -139,10 +155,13 @@ def convert_video_task(
     output_width: int,
     inference_width: int,
     desired_frame_rate: float | None = None,
+    crop: CropRect | None = None,
 ) -> None:
     """Convert video to JPEGs and populate database with Image records.
 
     This runs in a background thread, so we need to use synchronous database operations.
+    Safe to re-run for a project: stale frames are removed first and Image records are
+    reconciled rather than blindly inserted.
     """
 
     project_id_str = str(project_id)
@@ -152,6 +171,9 @@ def convert_video_task(
     output_dir.mkdir(parents=True, exist_ok=True)
     inference_dir = project_dir / "inference"
     inference_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove frames from any previous conversion so a stale frame set cannot survive
+    _remove_existing_frames(output_dir, inference_dir)
 
     def progress_cb(saved: int, total: int) -> None:
         conversion_progress[project_id_str]["saved"] = saved
@@ -166,6 +188,7 @@ def convert_video_task(
         inference_width,
         desired_fps=desired_frame_rate,
         progress_callback=progress_cb,
+        crop=crop,
     )
     conversion_progress[project_id_str]["error"] = did_error
     logger.info(
@@ -197,32 +220,61 @@ def convert_video_task(
     # Populate database with Image records
     try:
         logger.info(f"[BG] Creating Image records in database for project {project_id}")
+        _reconcile_image_records(project_id, output_dir, inference_dir)
+    except Exception as db_err:
+        logger.error(
+            f"[BG] Failed to create Image records for project {project_id}: {db_err}",
+            exc_info=db_err,
+        )
+        conversion_progress[project_id_str]["error"] = True
 
-        # Create synchronous database engine for background thread
-        # Convert async URL to sync URL
-        db_url = settings.get_database_url()
-        if "postgresql+asyncpg" in db_url:
-            sync_url = db_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
-        elif "sqlite+aiosqlite" in db_url:
-            sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
-        else:
-            sync_url = db_url
 
-        engine = create_engine(sync_url)
+def _reconcile_image_records(project_id: UUID, output_dir: Path, inference_dir: Path) -> None:
+    """Sync the project's Image records with the frames currently on disk.
 
-        with Session(engine) as session:
-            # Get all frame files
-            inference_files = sorted(inference_dir.glob("frame_*.jpg"))
-            output_files = sorted(output_dir.glob("frame_*.jpg"))
+    Updates existing records, inserts missing ones, and deletes records whose frame file is
+    gone, so a re-conversion does not duplicate rows.
 
-            # Create Image records for each frame
-            for inf_file, out_file in zip(inference_files, output_files, strict=False):
-                frame_number = int(inf_file.stem.split("_")[1])
+    Args:
+        project_id: Project UUID
+        output_dir: Directory holding the output-resolution frames
+        inference_dir: Directory holding the inference-resolution frames
+    """
+    # Create synchronous database engine for background thread
+    # Convert async URL to sync URL
+    db_url = settings.get_database_url()
+    if "postgresql+asyncpg" in db_url:
+        sync_url = db_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    elif "sqlite+aiosqlite" in db_url:
+        sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
+    else:
+        sync_url = db_url
 
-                # Construct relative paths from project directory
-                inf_rel_path = str(inf_file.relative_to(Path(settings.PROJECTS_ROOT_DIR)))
-                out_rel_path = str(out_file.relative_to(Path(settings.PROJECTS_ROOT_DIR)))
+    engine = create_engine(sync_url)
+    projects_root = Path(settings.PROJECTS_ROOT_DIR)
 
+    with Session(engine) as session:
+        inference_files = sorted(inference_dir.glob("frame_*.jpg"))
+        output_files = sorted(output_dir.glob("frame_*.jpg"))
+
+        # Existing records keyed by frame number, so a re-conversion updates rather
+        # than duplicates them
+        existing_images = {
+            image.frame_number: image
+            for image in session.scalars(select(Image).where(Image.project_id == project_id)).all()
+        }
+
+        converted_frame_numbers: set[int] = set()
+        for inf_file, out_file in zip(inference_files, output_files, strict=False):
+            frame_number = int(inf_file.stem.split("_")[1])
+            converted_frame_numbers.add(frame_number)
+
+            # Construct relative paths from project directory
+            inf_rel_path = str(inf_file.relative_to(projects_root))
+            out_rel_path = str(out_file.relative_to(projects_root))
+
+            image = existing_images.get(frame_number)
+            if image is None:
                 image = Image(
                     project_id=project_id,
                     frame_number=frame_number,
@@ -232,28 +284,32 @@ def convert_video_task(
                     manually_labeled=False,
                     validation=ValidationStatus.NOT_VALIDATED,
                 )
-                session.add(image)
+            else:
+                image.inference_path = inf_rel_path
+                image.output_path = out_rel_path
+                image.status = ImageStatus.PROCESSED
+            session.add(image)
 
-            session.commit()
-            logger.info(
-                f"[BG] Created {len(inference_files)} Image records for project {project_id}"
-            )
+        # Drop records whose frame no longer exists on disk
+        stale_frame_numbers = set(existing_images) - converted_frame_numbers
+        for frame_number in stale_frame_numbers:
+            session.delete(existing_images[frame_number])
 
-    except Exception as db_err:
-        logger.error(
-            f"[BG] Failed to create Image records for project {project_id}: {db_err}",
-            exc_info=db_err,
+        session.commit()
+        logger.info(
+            f"[BG] Reconciled {len(converted_frame_numbers)} Image records "
+            f"({len(stale_frame_numbers)} removed) for project {project_id}"
         )
-        conversion_progress[project_id_str]["error"] = True
 
 
-def _start_conversion_background(
+def start_conversion_background(
     project_id: UUID,
     video_path: Path,
     project_dir: Path,
     output_width: int,
     inference_width: int,
     desired_frame_rate: float | None = None,
+    crop: CropRect | None = None,
 ) -> None:
     """Start video-to-JPEG conversion in background thread.
 
@@ -263,6 +319,8 @@ def _start_conversion_background(
         project_dir: Project directory
         output_width: width of the output image
         inference_width: width of the inference image
+        desired_frame_rate: optional target frame rate for sampling
+        crop: optional normalized crop applied to every frame
     """
 
     # Start conversion in background thread
@@ -275,6 +333,7 @@ def _start_conversion_background(
             output_width,
             inference_width,
             desired_frame_rate,
+            crop,
         ),
         daemon=True,
     )

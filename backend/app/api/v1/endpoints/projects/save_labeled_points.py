@@ -2,7 +2,6 @@ import asyncio
 from pathlib import Path
 from uuid import UUID
 
-import cv2
 import numpy as np
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas import LabeledPointResponse, SaveLabeledPointsRequest
 from app.core.config import settings
+from app.core.contour_utils import mask_to_contour_data
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.sam3_state import get_primary_tracker
@@ -153,6 +153,9 @@ def _process_mask_to_contour(
 ) -> tuple[dict, float] | None:
     """Process a raw mask array into contours with hierarchy, preserving holes.
 
+    Uses the same area threshold and contour cap as propagated frames, so
+    manually labeled frames do not accumulate speckles.
+
     Args:
         mask: Raw numpy mask array from SAM
         frame_number: Frame number (for logging)
@@ -161,40 +164,12 @@ def _process_mask_to_contour(
         Tuple of (contour_data_dict, area) if successful, None otherwise.
         contour_data_dict has keys "contours" and "hierarchy".
     """
-    if mask.ndim > 2:
-        mask = np.squeeze(mask)
-    if mask.ndim != 2:
-        logger.warning(f"Unexpected mask shape {mask.shape}")
-        return None
-
-    mask_uint8 = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask.astype(np.uint8)
-    mask_uint8 = np.ascontiguousarray(mask_uint8)
-
-    contours, hierarchy = cv2.findContours(
-        mask_uint8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE,
-    )
-
-    if not contours or hierarchy is None:
-        logger.warning(f"SAM mask has no contours for frame {frame_number}")
-        return None
-
-    contours_list = [c.reshape(-1, 2).tolist() for c in contours]
-    hierarchy_list = hierarchy[0].tolist()
-
-    area = 0.0
-    for i, c in enumerate(contours):
-        ca = cv2.contourArea(c)
-        if hierarchy_list[i][3] == -1:
-            area += ca
-        else:
-            area -= ca
-    area = abs(area)
-
-    contour_data = {
-        "contours": contours_list,
-        "hierarchy": hierarchy_list,
-    }
-    return contour_data, area
+    result = mask_to_contour_data(mask, preserve_holes=True)
+    if result is None:
+        logger.warning(
+            f"SAM mask has no contours above the area threshold for frame {frame_number}"
+        )
+    return result
 
 
 async def _save_or_update_mask(

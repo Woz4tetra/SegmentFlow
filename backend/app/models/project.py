@@ -32,6 +32,10 @@ class Project(BaseModel):
         video_path: Path to uploaded video file
         trim_start: Start frame for trimmed video (0-indexed)
         trim_end: End frame for trimmed video (0-indexed)
+        crop_x: Crop rectangle left edge, normalized 0-1 against the source video width
+        crop_y: Crop rectangle top edge, normalized 0-1 against the source video height
+        crop_width: Crop rectangle width, normalized 0-1 against the source video width
+        crop_height: Crop rectangle height, normalized 0-1 against the source video height
         stage: Current project stage
         locked_by: Client session ID that has locked this project
         active: Whether project is active or archived
@@ -46,6 +50,12 @@ class Project(BaseModel):
     trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)
     desired_frame_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Crop rectangle normalized against the source video dimensions. All four columns are set
+    # together, or all are NULL to mean "no crop".
+    crop_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    crop_y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    crop_width: Mapped[float | None] = mapped_column(Float, nullable=True)
+    crop_height: Mapped[float | None] = mapped_column(Float, nullable=True)
     stage: Mapped[str] = mapped_column(
         String(50),
         default=ProjectStage.UPLOAD,

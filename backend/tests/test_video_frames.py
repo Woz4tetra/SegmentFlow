@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
+from app.core.crop_utils import CropRect
 from app.core.video_frames import (
     VideoInfo,
     _build_sampled_frame_indices,
@@ -15,6 +16,8 @@ from app.core.video_frames import (
     convert_video_to_jpegs,
     generate_thumbnail,
     get_video_info,
+    read_frame_at_index,
+    resize_to_width,
 )
 
 
@@ -579,3 +582,165 @@ class TestBuildSampledFrameIndices:
 
     def test_build_sampled_frame_indices_downsamples(self) -> None:
         assert _build_sampled_frame_indices(10, 30.0, 10.0) == [0, 3, 6, 9]
+
+
+class TestReadFrameAtIndex:
+    """Tests for decoding a single frame from the source video."""
+
+    def test_read_frame_at_index_seeks_and_returns_frame(self, mock_video_path: Path) -> None:
+        """Test that the capture is seeked to the requested frame and released."""
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_COUNT: 100,
+            cv2.CAP_PROP_FRAME_WIDTH: 640,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480,
+        }.get(prop, 0)
+        test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        mock_cap.read.return_value = (True, test_frame)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap):
+            frame = read_frame_at_index(mock_video_path, 42)
+
+        assert frame is not None
+        mock_cap.set.assert_called_once_with(cv2.CAP_PROP_POS_FRAMES, 42)
+        mock_cap.release.assert_called_once()
+
+    def test_read_frame_at_index_clamps_to_last_frame(self, mock_video_path: Path) -> None:
+        """Test that an out-of-range index is clamped to the final frame."""
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_COUNT: 10,
+            cv2.CAP_PROP_FRAME_WIDTH: 640,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480,
+        }.get(prop, 0)
+        mock_cap.read.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
+
+        with patch("cv2.VideoCapture", return_value=mock_cap):
+            read_frame_at_index(mock_video_path, 999)
+
+        mock_cap.set.assert_called_once_with(cv2.CAP_PROP_POS_FRAMES, 9)
+
+    def test_read_frame_at_index_returns_none_on_failure(self, mock_video_path: Path) -> None:
+        """Test that a failed read returns None instead of raising."""
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 10
+        mock_cap.read.return_value = (False, None)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap):
+            assert read_frame_at_index(mock_video_path, 0) is None
+
+        mock_cap.release.assert_called_once()
+
+
+class TestResizeToWidth:
+    """Tests for the aspect-preserving resize helper."""
+
+    def test_resize_to_width_preserves_aspect_ratio(self) -> None:
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        resized = resize_to_width(frame, 320)
+        assert resized.shape[1] == 320
+        assert resized.shape[0] == 240
+
+    def test_resize_to_width_noop_when_already_target(self) -> None:
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        assert resize_to_width(frame, 640) is frame
+
+
+class TestConvertVideoToJpegsWithCrop:
+    """Tests for cropping applied during conversion."""
+
+    def _mock_capture(self, frame: np.ndarray, frame_count: int = 1) -> MagicMock:
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_COUNT: frame_count,
+            cv2.CAP_PROP_FRAME_WIDTH: frame.shape[1],
+            cv2.CAP_PROP_FRAME_HEIGHT: frame.shape[0],
+        }.get(prop, 0)
+        mock_cap.read.return_value = (True, frame)
+        return mock_cap
+
+    def test_crop_changes_saved_aspect_ratio(
+        self,
+        mock_video_path: Path,
+        output_dir: Path,
+        inference_dir: Path,
+    ) -> None:
+        """Test that a half-height crop halves the saved frame height."""
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        mock_cap = self._mock_capture(frame)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap), patch("cv2.imwrite") as mock_imwrite:
+            mock_imwrite.return_value = True
+            result = convert_video_to_jpegs(
+                mock_video_path,
+                output_dir,
+                inference_dir,
+                output_width=320,
+                inference_width=640,
+                crop=CropRect(x=0.0, y=0.0, width=1.0, height=0.5),
+            )
+
+        assert result is False
+        assert mock_imwrite.call_count == 2
+        # Source 640x240 crop resized to width 320 keeps the 8:3 aspect ratio
+        output_image = mock_imwrite.call_args_list[0][0][1]
+        assert output_image.shape[1] == 320
+        assert output_image.shape[0] == 120
+
+    def test_crop_selects_requested_region(
+        self,
+        mock_video_path: Path,
+        output_dir: Path,
+        inference_dir: Path,
+    ) -> None:
+        """Test that only the pixels inside the crop rectangle are kept."""
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame[50:100, 50:100] = 255  # bottom-right quadrant is white
+        mock_cap = self._mock_capture(frame)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap), patch("cv2.imwrite") as mock_imwrite:
+            mock_imwrite.return_value = True
+            convert_video_to_jpegs(
+                mock_video_path,
+                output_dir,
+                inference_dir,
+                output_width=50,
+                inference_width=50,
+                crop=CropRect(x=0.5, y=0.5, width=0.5, height=0.5),
+            )
+
+        saved = mock_imwrite.call_args_list[0][0][1]
+        assert saved.shape[0:2] == (50, 50)
+        assert int(saved.min()) == 255
+
+    def test_no_crop_keeps_full_frame(
+        self,
+        mock_video_path: Path,
+        output_dir: Path,
+        inference_dir: Path,
+    ) -> None:
+        """Test that crop=None leaves the frame untouched."""
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        mock_cap = self._mock_capture(frame)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap), patch("cv2.imwrite") as mock_imwrite:
+            mock_imwrite.return_value = True
+            convert_video_to_jpegs(
+                mock_video_path,
+                output_dir,
+                inference_dir,
+                output_width=320,
+                inference_width=640,
+                crop=None,
+            )
+
+        output_image = mock_imwrite.call_args_list[0][0][1]
+        assert output_image.shape[1] == 320
+        assert output_image.shape[0] == 240

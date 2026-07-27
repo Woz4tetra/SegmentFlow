@@ -66,6 +66,49 @@
             <p class="hint" v-if="validationError">{{ validationError }}</p>
             <p class="hint" v-if="originalDownloadError">{{ originalDownloadError }}</p>
 
+            <section class="crop-section">
+              <div class="crop-section__header">
+                <div>
+                  <h3>Crop</h3>
+                  <p class="crop-section__subtitle">
+                    Drag the rectangle to pick the region kept from every frame. Applying re-extracts
+                    all frames from the source video.
+                  </p>
+                </div>
+                <span v-if="isCropped" class="crop-badge">Cropped</span>
+              </div>
+
+              <CropSelector
+                v-if="sourceWidth > 0"
+                v-model="cropRect"
+                :src="sourceFrameUrl"
+                :source-width="sourceWidth"
+                :source-height="sourceHeight"
+              />
+              <div v-else class="loading">Waiting for video dimensions…</div>
+
+              <p class="hint" v-if="cropError">{{ cropError }}</p>
+
+              <div class="crop-actions">
+                <button
+                  class="ghost"
+                  type="button"
+                  :disabled="applyingCrop || isFullFrame"
+                  @click="resetCrop"
+                >
+                  Reset to full frame
+                </button>
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="applyingCrop || !cropChanged"
+                  @click="applyCrop"
+                >
+                  {{ applyingCrop ? 'Applying…' : 'Apply crop' }}
+                </button>
+              </div>
+            </section>
+
             <div class="utility-actions">
               <button
                 class="ghost"
@@ -183,12 +226,20 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref, computed } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import { API_BASE_URL, resolveApiAssetUrl } from '../lib/api';
 import DualRangeSlider from '../components/DualRangeSlider.vue';
 import StageNavigation from '../components/StageNavigation.vue';
+import CropSelector from '../components/CropSelector.vue';
+import {
+  FULL_FRAME_CROP,
+  clampCrop,
+  cropsEqual,
+  isFullFrameCrop,
+  type CropRect,
+} from '../lib/crop';
 
 interface Project {
   id: string;
@@ -197,6 +248,10 @@ interface Project {
   video_path?: string | null;
   trim_start?: number | null;
   trim_end?: number | null;
+  crop_x?: number | null;
+  crop_y?: number | null;
+  crop_width?: number | null;
+  crop_height?: number | null;
   stage: string;
   created_at: string;
   updated_at: string;
@@ -229,8 +284,31 @@ const duration = ref(0);
 const startSec = ref(0);
 const endSec = ref(0);
 const baseApi = API_BASE_URL;
-const previewStartUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${startSec.value}`);
-const previewEndUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${endSec.value}`);
+// Bumped after a re-extraction so the previews do not show cached pre-crop frames
+const previewVersion = ref(0);
+const previewStartUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${startSec.value}&v=${previewVersion.value}`);
+const previewEndUrl = computed(() => `${baseApi}/projects/${projectId}/preview_frame?time_sec=${endSec.value}&v=${previewVersion.value}`);
+
+// Crop state. The selector needs the uncropped source frame, otherwise a crop could never be
+// widened again once it has been baked into the extracted frames.
+const sourceWidth = ref(0);
+const sourceHeight = ref(0);
+const cropRect = ref<CropRect>({ ...FULL_FRAME_CROP });
+const savedCrop = ref<CropRect | null>(null);
+const cropError = ref('');
+const applyingCrop = ref(false);
+const cropPreviewSec = ref(0);
+let cropPreviewTimer: number | null = null;
+const sourceFrameUrl = computed(
+  () => `${baseApi}/projects/${projectId}/source_frame?time_sec=${cropPreviewSec.value}`,
+);
+
+const isFullFrame = computed(() => isFullFrameCrop(cropRect.value));
+const isCropped = computed(() => savedCrop.value !== null);
+const cropChanged = computed(() => {
+  const requested = isFullFrame.value ? null : cropRect.value;
+  return !cropsEqual(requested, savedCrop.value);
+});
 
 // Conversion progress tracking
 const conversionSaved = ref(0);
@@ -359,6 +437,9 @@ async function startManualLabeling(): Promise<void> {
 async function fetchVideoInfo() {
   const { data } = await api.get<{ fps: number; frame_count: number; width: number; height: number; duration: number }>(`/projects/${projectId}/video_info`);
   duration.value = data?.duration ?? 0;
+  // Source dimensions drive the crop selector's pixel readout and minimum size
+  sourceWidth.value = data?.width ?? 0;
+  sourceHeight.value = data?.height ?? 0;
   // Set conversion total to frame count (indicates conversion is complete)
   if (data?.frame_count > 0) {
     conversionTotal.value = data.frame_count;
@@ -377,6 +458,57 @@ async function fetchProject() {
   // Load existing trim values if set
   if (data.trim_start != null) startSec.value = data.trim_start;
   if (data.trim_end != null) endSec.value = data.trim_end;
+  loadCropFromProject(data);
+}
+
+function loadCropFromProject(data: Project): void {
+  const { crop_x, crop_y, crop_width, crop_height } = data;
+  if (crop_x == null || crop_y == null || crop_width == null || crop_height == null) {
+    savedCrop.value = null;
+    cropRect.value = { ...FULL_FRAME_CROP };
+    return;
+  }
+  const stored: CropRect = { x: crop_x, y: crop_y, width: crop_width, height: crop_height };
+  savedCrop.value = stored;
+  cropRect.value = { ...stored };
+}
+
+function resetCrop(): void {
+  cropError.value = '';
+  cropRect.value = { ...FULL_FRAME_CROP };
+}
+
+async function applyCrop(): Promise<void> {
+  if (applyingCrop.value || !cropChanged.value) return;
+
+  const clearing = isFullFrame.value;
+  const message = clearing
+    ? 'Removing the crop re-extracts every frame from the source video. Existing labels and masks for this project will be deleted. Continue?'
+    : 'Applying a crop re-extracts every frame from the source video. Existing labels and masks for this project will be deleted. Continue?';
+  if (!window.confirm(message)) return;
+
+  applyingCrop.value = true;
+  cropError.value = '';
+  const payload = clearing
+    ? { x: null, y: null, width: null, height: null }
+    : clampCrop(cropRect.value, sourceWidth.value, sourceHeight.value);
+
+  try {
+    const { data } = await api.post<Project>(`/projects/${projectId}/crop`, payload);
+    if (data) {
+      project.value = data;
+      loadCropFromProject(data);
+    }
+    // Re-extraction runs in the background and clears the thumbnail, so the existing
+    // conversion progress UI reports it.
+    conversionSaved.value = 0;
+    startConversionPolling();
+  } catch (error) {
+    console.error('Failed to apply crop:', error);
+    cropError.value = 'Failed to apply crop. Please try again.';
+  } finally {
+    applyingCrop.value = false;
+  }
 }
 
 async function saveTrim() {
@@ -489,17 +621,20 @@ async function checkConversionProgress(): Promise<boolean> {
 function startConversionPolling() {
   conversionInProgress.value = true;
   console.log('[Trim] Conversion polling started');
+  stopConversionPolling();
   conversionPollInterval = setInterval(async () => {
     const stillInProgress = await checkConversionProgress();
-    console.log('[Trim] Polling check:', { 
-      saved: conversionSaved.value, 
-      total: conversionTotal.value, 
-      stillInProgress 
+    console.log('[Trim] Polling check:', {
+      saved: conversionSaved.value,
+      total: conversionTotal.value,
+      stillInProgress
     });
     if (!stillInProgress) {
       console.log('[Trim] Conversion complete, stopping polling');
       stopConversionPolling();
       conversionInProgress.value = false;
+      // Frames on disk changed, so force the previews to reload
+      previewVersion.value += 1;
     }
   }, 500);
 }
@@ -510,6 +645,18 @@ function stopConversionPolling() {
     conversionPollInterval = null;
   }
 }
+
+// Decoding a source frame is more expensive than serving a pre-generated JPEG, so debounce
+// while the trim handle is being dragged.
+watch(startSec, (value) => {
+  if (cropPreviewTimer !== null) {
+    clearTimeout(cropPreviewTimer);
+  }
+  cropPreviewTimer = window.setTimeout(() => {
+    cropPreviewSec.value = value;
+    cropPreviewTimer = null;
+  }, 200);
+});
 
 onMounted(async () => {
   try {
@@ -557,6 +704,10 @@ onMounted(async () => {
 onUnmounted(() => {
   console.log('[Trim] Unmounting, stopping polling');
   stopConversionPolling();
+  if (cropPreviewTimer !== null) {
+    clearTimeout(cropPreviewTimer);
+    cropPreviewTimer = null;
+  }
 });
 </script>
 
@@ -604,6 +755,58 @@ h1 { margin: 0 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
 .ghost { background: var(--surface, #ffffff); border: 1px solid var(--border, #dfe3ec); color: var(--text, #0f172a); padding: 0.55rem 0.9rem; border-radius: 12px; font-weight: 600; cursor: pointer; }
 .loading { color: var(--muted, #6b7280); }
 .hint { color: #b91c1c; }
+
+.crop-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #dfe3ec);
+  border-radius: 14px;
+  background: var(--surface-elevated, var(--surface, #ffffff));
+}
+
+.crop-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.crop-section__header h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+
+.crop-section__subtitle {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--muted, #4b5563);
+  font-size: 0.9rem;
+}
+
+.crop-badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.5);
+}
+
+.crop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.crop-actions .primary:disabled,
+.crop-actions .ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 .label-settings {
   border: 1px solid var(--border, #dfe3ec);

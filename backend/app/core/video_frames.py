@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from app.core.crop_utils import CropRect, crop_frame
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,46 @@ def get_video_info(video_path: Path) -> VideoInfo:
     return info
 
 
+def read_frame_at_index(video_path: Path, frame_index: int) -> np.ndarray | None:
+    """Decode a single uncropped frame directly from the source video.
+
+    Args:
+        video_path: Path to input video
+        frame_index: Frame index to seek to (0-indexed, clamped to the video length)
+
+    Returns:
+        np.ndarray | None: The decoded frame, or None if it could not be read
+    """
+    cap, info = _open_capture(video_path)
+    try:
+        target = max(0, min(frame_index, max(info.frame_count - 1, 0)))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        success, frame = cap.read()
+        if not success:
+            logger.warning(f"Failed to read frame {target} from {video_path}")
+            return None
+        return frame
+    finally:
+        cap.release()
+
+
+def resize_to_width(frame: np.ndarray, target_width: int) -> np.ndarray:
+    """Resize a frame to the target width, preserving aspect ratio.
+
+    Args:
+        frame: Frame as a HxWxC array
+        target_width: Desired output width in pixels
+
+    Returns:
+        np.ndarray: The resized frame
+    """
+    original_height, original_width = frame.shape[0:2]
+    if original_width <= 0 or original_height <= 0 or original_width == target_width:
+        return frame
+    target_height = max(1, int(target_width * original_height / original_width))
+    return cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+
+
 def _save_single_frame(frame: np.ndarray, out_path: Path, output_width: int) -> None:
     """Save a single frame to JPEG."""
     original_height, original_width = frame.shape[0:2]
@@ -62,6 +103,7 @@ def convert_video_to_jpegs(
     inference_width: int,
     desired_fps: float | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    crop: CropRect | None = None,
 ) -> bool:
     """Convert frames in [start_sec, end_sec] to JPEG files.
 
@@ -72,6 +114,7 @@ def convert_video_to_jpegs(
         output_width: Output image width
         inference_width: Inference image width
         progress_callback: Optional callable(saved, total) for progress tracking
+        crop: Optional normalized crop applied to every frame before resizing
 
     Returns:
         bool: Did the conversion succeed
@@ -95,6 +138,8 @@ def convert_video_to_jpegs(
                 break
             if idx not in frame_set:
                 continue
+            # Crop once so both resolutions cover the identical region
+            frame = crop_frame(frame, crop)
             for width, base_dir in ((output_width, output_dir), (inference_width, inference_dir)):
                 image_out_path = base_dir / f"frame_{idx:06d}.jpg"
                 logger.debug(f"Saving to {image_out_path} with width {width}")
