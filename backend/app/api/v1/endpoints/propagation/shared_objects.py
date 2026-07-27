@@ -616,6 +616,15 @@ async def process_segment(
         logger.warning(f"No source data for frame {segment.source_frame}, skipping segment")
         return
 
+    def get_obj_id(label_id: uuid.UUID, label_id_to_obj_id: dict[uuid.UUID, int]) -> int:
+        """Return a stable, compact object ID for a label within this segment."""
+        existing = label_id_to_obj_id.get(label_id)
+        if existing is not None:
+            return existing
+        new_obj_id = len(label_id_to_obj_id) + 1
+        label_id_to_obj_id[label_id] = new_obj_id
+        return new_obj_id
+
     def build_points_by_obj(
         frame_data: dict[str, Any],
         label_id_to_obj_id: dict[uuid.UUID, int],
@@ -624,7 +633,7 @@ async def process_segment(
         for label_id, points in frame_data["points_by_label"].items():
             if not points:
                 continue
-            obj_id = label_id_to_obj_id.setdefault(label_id, hash(str(label_id)))
+            obj_id = get_obj_id(label_id, label_id_to_obj_id)
             pts_array = np.array([[p["x"], p["y"]] for p in points], dtype=np.float32)
             labels_array = np.array([1 if p["include"] else 0 for p in points], dtype=np.int32)
             frame_points_by_obj[obj_id] = (pts_array, labels_array)
