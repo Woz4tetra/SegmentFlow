@@ -5,7 +5,6 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -118,8 +117,8 @@ async def init_db() -> None:
             # Create all tables
             await conn.run_sync(Base.metadata.create_all)
 
-            # Apply schema migrations for existing tables
-            await _apply_schema_migrations(conn)
+        # Apply schema migrations for existing tables
+        await _apply_schema_migrations()
 
         logger.info("Database initialization complete")
     except Exception as e:
@@ -127,13 +126,30 @@ async def init_db() -> None:
         raise
 
 
-async def _apply_schema_migrations(conn: AsyncConnection) -> None:
+async def _run_migration(statement: str) -> None:
+    """Run one migration statement in its own transaction.
+
+    Each statement gets a dedicated transaction so that an expected failure (for example a
+    column that already exists) cannot abort the statements that follow it.
+
+    Args:
+        statement: SQL to execute
+    """
+    from sqlalchemy import text
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(statement))
+        logger.debug("Applied schema migration")
+    except Exception as e:
+        logger.debug(f"Schema migration skipped or failed: {e}")
+
+
+async def _apply_schema_migrations() -> None:
     """Apply schema migrations for existing columns.
 
     This handles ALTER TABLE operations that create_all doesn't cover.
     """
-    from sqlalchemy import text
-
     db_url = settings.get_database_url()
     if _is_sqlite(db_url):
         # SQLite-specific migrations
@@ -146,13 +162,22 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
             """
             ALTER TABLE projects ADD COLUMN desired_frame_rate FLOAT;
             """,
+            # Migration: add projects crop rectangle columns if missing
+            """
+            ALTER TABLE projects ADD COLUMN crop_x FLOAT;
+            """,
+            """
+            ALTER TABLE projects ADD COLUMN crop_y FLOAT;
+            """,
+            """
+            ALTER TABLE projects ADD COLUMN crop_width FLOAT;
+            """,
+            """
+            ALTER TABLE projects ADD COLUMN crop_height FLOAT;
+            """,
         ]
         for migration in sqlite_migrations:
-            try:
-                await conn.execute(text(migration))
-                logger.debug("Applied SQLite schema migration")
-            except Exception as e:
-                logger.debug(f"SQLite schema migration skipped or failed: {e}")
+            await _run_migration(migration)
         return
 
     # PostgreSQL migrations
@@ -196,11 +221,23 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
             END IF;
         END $$;
         """,
+        # Migration: add projects crop rectangle columns
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'projects' AND column_name = 'crop_x'
+            ) THEN
+                ALTER TABLE projects ADD COLUMN crop_x DOUBLE PRECISION;
+                ALTER TABLE projects ADD COLUMN crop_y DOUBLE PRECISION;
+                ALTER TABLE projects ADD COLUMN crop_width DOUBLE PRECISION;
+                ALTER TABLE projects ADD COLUMN crop_height DOUBLE PRECISION;
+            END IF;
+        END $$;
+        """,
     ]
 
     for migration in migrations:
-        try:
-            await conn.execute(text(migration))
-            logger.debug("Applied schema migration")
-        except Exception as e:
-            logger.warning(f"Schema migration skipped or failed: {e}")
+        await _run_migration(migration)

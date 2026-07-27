@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 from fastapi import APIRouter, WebSocket
 from sqlalchemy import func, select
@@ -25,6 +24,7 @@ from app.api.v1.schemas import (
     PropagationSegment,
 )
 from app.core.config import settings
+from app.core.contour_utils import mask_to_contour_data
 from app.core.logging import get_logger
 from app.core.sam3_state import get_all_trackers, get_primary_tracker
 from app.core.trim_utils import get_trim_frame_bounds
@@ -97,55 +97,11 @@ def mask_to_contour(mask: np.ndarray) -> tuple[Any, float]:
         Tuple of (contour_polygon, area). contour_polygon is saved in
         multi-contour JSON format: {"contours": [[[x, y], ...], ...], "hierarchy": ...}
     """
-    # Squeeze extra dimensions (SAM3 may return masks with shape (1, H, W) or (H, W))
-    mask_2d = np.squeeze(mask)
-
-    # Ensure we have a 2D array
-    if mask_2d.ndim != 2:
-        logger.warning(f"Unexpected mask shape after squeeze: {mask_2d.shape}, expected 2D")
+    # External contours only, so nested regions stay filled as before.
+    result = mask_to_contour_data(mask, preserve_holes=False)
+    if result is None:
         return [], 0.0
-
-    # Ensure mask is uint8 and contiguous
-    if mask_2d.dtype == bool:
-        mask_uint8 = mask_2d.astype(np.uint8) * 255
-    else:
-        mask_uint8 = mask_2d.astype(np.uint8)
-
-    # Ensure contiguous memory layout for OpenCV
-    mask_uint8 = np.ascontiguousarray(mask_uint8)
-
-    # Find external contours for disconnected components.
-    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if not contours:
-        return [], 0.0
-
-    min_area = float(settings.MIN_CONTOUR_AREA_PX)
-    max_contours = max(1, int(settings.MAX_PROPAGATION_CONTOURS))
-
-    contours_with_area: list[tuple[np.ndarray, float]] = []
-    for contour in contours:
-        area = float(cv2.contourArea(contour))
-        if area >= min_area:
-            contours_with_area.append((contour, area))
-
-    if not contours_with_area:
-        return [], 0.0
-
-    contours_with_area.sort(key=lambda item: item[1], reverse=True)
-    kept = contours_with_area[:max_contours]
-    total_area = float(sum(area for _, area in kept))
-
-    contour_payload: list[list[list[float]]] = []
-    hierarchy_payload: list[list[int]] = []
-    for idx, (contour, _area) in enumerate(kept):
-        contour_payload.append([[float(pt[0][0]), float(pt[0][1])] for pt in contour])
-        next_idx = idx + 1 if idx < len(kept) - 1 else -1
-        prev_idx = idx - 1 if idx > 0 else -1
-        # External contours only; no parent/child relations.
-        hierarchy_payload.append([next_idx, prev_idx, -1, -1])
-
-    return {"contours": contour_payload, "hierarchy": hierarchy_payload}, total_area
+    return result
 
 
 async def get_labeled_frames(

@@ -15,6 +15,7 @@ from .get_labeled_points import get_labeled_points
 from .get_masks import get_masks
 from .get_original_video import get_original_video
 from .get_project import get_project
+from .get_source_frame import get_source_frame
 from .get_thumbnail import get_thumbnail
 from .get_upload_progress import get_upload_progress
 from .init_video_upload import init_video_upload
@@ -26,6 +27,7 @@ from .mark_stage_visited import mark_stage_visited
 from .preview_frame import preview_frame
 from .save_labeled_points import save_labeled_points
 from .save_mask import save_mask
+from .set_crop_region import set_crop_region
 from .set_trim_range import set_trim_range
 from .shared_objects import router
 from .update_frame_validation import update_frame_validation
@@ -51,6 +53,7 @@ __all__ = [
     "get_masks",
     "get_original_video",
     "get_project",
+    "get_source_frame",
     "get_thumbnail",
     "get_upload_progress",
     "init_video_upload",
@@ -63,6 +66,7 @@ __all__ = [
     "router",
     "save_labeled_points",
     "save_mask",
+    "set_crop_region",
     "set_trim_range",
     "update_frame_validation",
     "update_project_label_setting",

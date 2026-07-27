@@ -96,6 +96,10 @@ class ProjectResponse(ProjectBase):
         video_path: Path to uploaded video file
         trim_start: Start frame for trimmed video
         trim_end: End frame for trimmed video
+        crop_x: Crop rectangle left edge, normalized 0-1 (null when uncropped)
+        crop_y: Crop rectangle top edge, normalized 0-1 (null when uncropped)
+        crop_width: Crop rectangle width, normalized 0-1 (null when uncropped)
+        crop_height: Crop rectangle height, normalized 0-1 (null when uncropped)
         stage: Current project stage
         locked_by: Client session ID that has locked this project
         created_at: Timestamp when project was created
@@ -107,6 +111,10 @@ class ProjectResponse(ProjectBase):
     trim_start: float | None = None
     trim_end: float | None = None
     desired_frame_rate: float | None = None
+    crop_x: float | None = None
+    crop_y: float | None = None
+    crop_width: float | None = None
+    crop_height: float | None = None
     stage: str
     locked_by: str | None = None
     created_at: datetime
@@ -133,6 +141,30 @@ class ProjectListResponse(BaseModel):
 
     projects: list[ProjectResponse] = Field(..., description="List of projects")
     total: int = Field(..., description="Total number of projects")
+
+
+class CropRegionRequest(BaseModel):
+    """Schema for setting a project's crop rectangle.
+
+    Coordinates are normalized against the source video dimensions so the same rectangle
+    applies to both the output and inference frame resolutions. Send all four fields as null
+    to clear the crop and restore full frames.
+
+    Attributes:
+        x: Left edge, normalized 0-1
+        y: Top edge, normalized 0-1
+        width: Rectangle width, normalized 0-1
+        height: Rectangle height, normalized 0-1
+    """
+
+    x: float | None = Field(None, ge=0.0, le=1.0, description="Left edge, normalized 0-1")
+    y: float | None = Field(None, ge=0.0, le=1.0, description="Top edge, normalized 0-1")
+    width: float | None = Field(None, gt=0.0, le=1.0, description="Width, normalized 0-1")
+    height: float | None = Field(None, gt=0.0, le=1.0, description="Height, normalized 0-1")
+
+    def is_cleared(self) -> bool:
+        """Return True when the request asks to remove the crop."""
+        return self.x is None and self.y is None and self.width is None and self.height is None
 
 
 class ClearPropagatedFramesResponse(BaseModel):
