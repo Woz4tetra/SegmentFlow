@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,7 @@ from app.core.crop_utils import CropRect, get_project_crop
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.video_frames import convert_video_to_jpegs, generate_thumbnail
+from app.core.video_transcode import ensure_opencv_readable
 from app.models.image import Image, ImageStatus, ValidationStatus
 from app.models.project import Project, ProjectStage
 
@@ -167,6 +169,19 @@ def convert_video_task(
     project_id_str = str(project_id)
     logger.info(f"[BG] Starting conversion for project {project_id}")
     conversion_progress[project_id_str] = {"saved": 0, "total": 0, "error": False}
+
+    # OpenCV cannot decode every codec we accept (AV1, notably). Normalize first so
+    # extraction and the preview endpoints both have something they can read.
+    try:
+        readable_path = ensure_opencv_readable(video_path)
+    except RuntimeError as transcode_err:
+        logger.error(f"[BG] Cannot decode video for project {project_id}: {transcode_err}")
+        conversion_progress[project_id_str]["error"] = True
+        return
+    if readable_path != video_path:
+        video_path = readable_path
+        _update_project_video_path(project_id, readable_path)
+
     output_dir = project_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     inference_dir = project_dir / "inference"
@@ -229,6 +244,36 @@ def convert_video_task(
         conversion_progress[project_id_str]["error"] = True
 
 
+def _sync_engine() -> Engine:
+    """Build a synchronous engine for use from the background conversion thread."""
+    db_url = settings.get_database_url()
+    if "postgresql+asyncpg" in db_url:
+        sync_url = db_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    elif "sqlite+aiosqlite" in db_url:
+        sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
+    else:
+        sync_url = db_url
+    return create_engine(sync_url)
+
+
+def _update_project_video_path(project_id: UUID, video_path: Path) -> None:
+    """Point the project at a different video file, e.g. after a transcode.
+
+    Args:
+        project_id: Project UUID
+        video_path: Path the project should use from now on
+    """
+    with Session(_sync_engine()) as session:
+        project = session.scalars(select(Project).where(Project.id == project_id)).one_or_none()
+        if project is None:
+            logger.warning(f"[BG] Project {project_id} vanished before video path update")
+            return
+        project.video_path = str(video_path)
+        session.add(project)
+        session.commit()
+    logger.info(f"[BG] Project {project_id} now uses video {video_path}")
+
+
 def _reconcile_image_records(project_id: UUID, output_dir: Path, inference_dir: Path) -> None:
     """Sync the project's Image records with the frames currently on disk.
 
@@ -240,17 +285,8 @@ def _reconcile_image_records(project_id: UUID, output_dir: Path, inference_dir: 
         output_dir: Directory holding the output-resolution frames
         inference_dir: Directory holding the inference-resolution frames
     """
-    # Create synchronous database engine for background thread
-    # Convert async URL to sync URL
-    db_url = settings.get_database_url()
-    if "postgresql+asyncpg" in db_url:
-        sync_url = db_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
-    elif "sqlite+aiosqlite" in db_url:
-        sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
-    else:
-        sync_url = db_url
-
-    engine = create_engine(sync_url)
+    # Synchronous engine, since this runs in a background thread
+    engine = _sync_engine()
     projects_root = Path(settings.PROJECTS_ROOT_DIR)
 
     with Session(engine) as session:

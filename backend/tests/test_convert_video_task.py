@@ -89,6 +89,16 @@ def mock_project_dirs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 class TestConvertVideoTask:
     """Tests for convert_video_task background function."""
 
+    @pytest.fixture(autouse=True)
+    def skip_transcode(self):
+        """Treat the placeholder video files as already decodable.
+
+        These tests mock frame extraction, so the real decodability check would only
+        ever see an empty file and try to transcode it.
+        """
+        with patch(f"{TASK_MODULE}.ensure_opencv_readable", side_effect=lambda path: path):
+            yield
+
     @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
     @patch("app.api.v1.endpoints.projects.complete_video_upload.generate_thumbnail")
     @patch("app.api.v1.endpoints.projects.complete_video_upload.Session")
@@ -284,6 +294,42 @@ class TestConvertVideoTask:
         assert project_id_str in conversion_progress
 
         # Clean up progress tracking
+        del conversion_progress[project_id_str]
+
+    @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")
+    def test_convert_video_task_undecodable_video(
+        self,
+        mock_convert_video: Mock,
+        mock_project_dirs: tuple[Path, Path, Path, Path],
+    ) -> None:
+        """A video that cannot be decoded or transcoded fails loudly.
+
+        Extraction must not run, and the progress entry has to carry the error so the
+        UI does not present an empty project as a finished conversion.
+        """
+        project_dir, _output_dir, _inference_dir, video_path = mock_project_dirs
+        project_id = uuid4()
+
+        # Overrides the autouse patch for this test.
+        with (
+            patch(
+                f"{TASK_MODULE}.ensure_opencv_readable",
+                side_effect=RuntimeError("ffmpeg failed"),
+            ),
+            patch_projects_root(project_dir.parent),
+        ):
+            convert_video_task(
+                project_id=project_id,
+                video_path=video_path,
+                project_dir=project_dir,
+                output_width=1920,
+                inference_width=640,
+            )
+
+        mock_convert_video.assert_not_called()
+        project_id_str = str(project_id)
+        assert conversion_progress[project_id_str]["error"] is True
+
         del conversion_progress[project_id_str]
 
     @patch("app.api.v1.endpoints.projects.complete_video_upload.convert_video_to_jpegs")

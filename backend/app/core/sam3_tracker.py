@@ -13,7 +13,7 @@ import os
 import shutil
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +92,19 @@ class SAM3Tracker:
             f"SAM3Tracker initialized for GPU {self.gpu_id}, inference width: {inference_width}"
         )
 
+    @contextlib.contextmanager
+    def _inference_context(self) -> Iterator[None]:
+        """Select the GPU and enable bfloat16 autocast for SAM3 inference.
+
+        SAM3's fused MLP kernels cast their inputs to bfloat16 unconditionally, so the
+        float32 layers that follow them only work while an autocast context is active.
+        The predictor enters one in its constructor, but autocast state is thread-local:
+        inference dispatched to a worker thread that did not build the model would
+        otherwise fail with "mat1 and mat2 must have the same dtype".
+        """
+        with torch.cuda.device(self.gpu_id), torch.autocast("cuda", dtype=torch.bfloat16):
+            yield
+
     def _setup_device_optimizations(self) -> None:
         """Enable optimizations for the GPU (call once before using GPU)."""
         if not torch.cuda.is_available():
@@ -165,7 +178,7 @@ class SAM3Tracker:
 
         # CRITICAL: Set the default CUDA device BEFORE building the model
         # This ensures all tensors are created on the correct GPU from the start
-        with torch.cuda.device(self.gpu_id), torch.autocast("cuda", dtype=torch.bfloat16):
+        with self._inference_context():
             self.model = build_sam3_video_model()
             if self.model is not None:
                 self.model = self.model.to(self.device)
@@ -568,7 +581,7 @@ class SAM3Tracker:
         logger.info(f"Initializing inference state from: {frames_dir} on cuda:{self.gpu_id}")
 
         # Ensure we're on the correct GPU when initializing inference state
-        with torch.cuda.device(self.gpu_id):
+        with self._inference_context():
             if self.predictor is not None:
                 self.inference_state = self.predictor.init_state(video_path=frames_dir)
 
@@ -610,6 +623,12 @@ class SAM3Tracker:
     ) -> np.ndarray | None:
         """Add point prompts for an object on a specific frame.
 
+        Points are submitted one at a time, in click order. SAM3 refines its previous
+        prediction on each call (``iter_use_prev_mask_pred``), which is how the mask
+        decoder was trained; handing it the whole prompt in a single call makes it
+        ignore most of the clicks. Image features are cached in the inference state,
+        so the extra calls only re-run the mask decoder.
+
         Args:
             local_frame_idx: Frame index relative to extracted frames (0-based)
             obj_id: Object ID
@@ -627,18 +646,22 @@ class SAM3Tracker:
             return None
 
         # Create tensors on the correct device
-        with torch.cuda.device(self.gpu_id):
+        with self._inference_context():
             points_tensor = torch.tensor(points, dtype=torch.float32, device=self.device)
             labels_tensor = torch.tensor(labels, dtype=torch.int32, device=self.device)
 
-            _, out_obj_ids, _low_res_masks, video_res_masks = self.predictor.add_new_points(
-                inference_state=self.inference_state,
-                frame_idx=local_frame_idx,
-                obj_id=obj_id,
-                points=points_tensor,
-                labels=labels_tensor,
-                clear_old_points=clear_old,
-            )
+            out_obj_ids: list[int] = []
+            video_res_masks = None
+            for idx in range(points_tensor.shape[0]):
+                _, out_obj_ids, _low_res_masks, video_res_masks = self.predictor.add_new_points(
+                    inference_state=self.inference_state,
+                    frame_idx=local_frame_idx,
+                    obj_id=obj_id,
+                    points=points_tensor[idx : idx + 1],
+                    labels=labels_tensor[idx : idx + 1],
+                    # Only the first call clears; the rest accumulate onto it.
+                    clear_old_points=clear_old and idx == 0,
+                )
 
         # Return the mask for this object, scaled to original size
         if video_res_masks is not None:
@@ -728,7 +751,7 @@ class SAM3Tracker:
             # Propagate through frames (ensure correct GPU context)
             video_segments: dict[int, dict[int, np.ndarray]] = {}
 
-            with torch.cuda.device(self.gpu_id):
+            with self._inference_context():
                 for (
                     local_frame_idx,
                     obj_ids,

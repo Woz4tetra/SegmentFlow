@@ -134,6 +134,8 @@ def convert_video_to_jpegs(
             logger.debug(f"Read frame {idx}")
             success, frame = cap.read()
             if not success:
+                # Containers routinely report a frame count a little past the last
+                # decodable frame, so stopping early is only fatal if we got nothing.
                 logger.error(f"Failed to extract frame index {idx}.")
                 break
             if idx not in frame_set:
@@ -152,6 +154,10 @@ def convert_video_to_jpegs(
         logger.error(f"Error during conversion: {e}")
     finally:
         cap.release()
+
+    if saved == 0 and total > 0:
+        did_error_occur = True
+        logger.error(f"No frames could be decoded from {video_path}")
 
     if progress_callback:
         progress_callback(total, total)

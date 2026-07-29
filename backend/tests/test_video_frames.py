@@ -348,6 +348,44 @@ class TestConvertVideoToJpegs:
             # Capture should be released
             mock_cap.release.assert_called_once()
 
+    def test_convert_video_to_jpegs_reports_error_when_nothing_decodes(
+        self,
+        mock_video_path: Path,
+        output_dir: Path,
+        inference_dir: Path,
+    ) -> None:
+        """A video whose very first frame fails to decode is reported as an error.
+
+        Codecs OpenCV cannot handle open fine and then fail on every read; without
+        this the caller would treat a project with zero frames as converted.
+
+        Args:
+            mock_video_path: Mock video file path
+            output_dir: Output directory
+            inference_dir: Inference directory
+        """
+        mock_cap = MagicMock(spec=cv2.VideoCapture)
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_COUNT: 5,
+            cv2.CAP_PROP_FRAME_WIDTH: 640,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480,
+        }.get(prop, 0)
+        mock_cap.read.return_value = (False, None)
+
+        with patch("cv2.VideoCapture", return_value=mock_cap):
+            result = convert_video_to_jpegs(
+                mock_video_path,
+                output_dir,
+                inference_dir,
+                output_width=320,
+                inference_width=640,
+            )
+
+        assert result is True
+        mock_cap.release.assert_called_once()
+
     def test_convert_video_to_jpegs_with_exception(
         self,
         mock_video_path: Path,

@@ -396,10 +396,41 @@ async def analyze_propagation_segments(
     return segments, source_frames_data
 
 
+def select_frames_to_save(
+    video_segments: dict[int, dict[int, np.ndarray]],
+    segment: PropagationSegment,
+) -> dict[int, dict[int, np.ndarray]]:
+    """Pick which of a segment's propagated frames get written to the database.
+
+    The source frame is kept. SAM re-derives it from the same clicks but with full
+    multi-object and memory context, so its mask is better than the one single-frame
+    inference stored at labeling time; dropping it leaves manually labeled frames
+    disagreeing with every propagated frame around them.
+
+    The anchor frame is dropped, because it is the next segment's source frame and
+    gets written there from its own clicks.
+
+    Args:
+        video_segments: Dict of {frame_number: {obj_id: mask}} from propagation
+        segment: The segment that produced these masks
+
+    Returns:
+        The subset of ``video_segments`` that should be persisted
+    """
+    return {
+        frame_number: obj_masks
+        for frame_number, obj_masks in video_segments.items()
+        if frame_number != segment.anchor_frame
+        and (
+            frame_number == segment.source_frame
+            or segment.start_frame <= frame_number <= segment.end_frame
+        )
+    }
+
+
 async def save_segment_masks(
     video_segments: dict[int, dict[int, np.ndarray]],
     label_id_to_obj_id: dict[uuid.UUID, int],
-    source_frame: int,
     project_id: uuid.UUID,
     db: AsyncSession,
 ) -> None:
@@ -408,7 +439,6 @@ async def save_segment_masks(
     Args:
         video_segments: Dict of {frame_idx: {obj_id: mask}}
         label_id_to_obj_id: Mapping from label_id to obj_id
-        source_frame: Source frame number (to skip)
         project_id: Project UUID
         db: Database session
     """
@@ -418,10 +448,6 @@ async def save_segment_masks(
 
     # Save masks for each frame
     for frame_idx, obj_masks in video_segments.items():
-        # Skip source frame (already has masks)
-        if frame_idx == source_frame:
-            continue
-
         image = images_by_frame.get(frame_idx)
         if not image:
             continue
@@ -677,21 +703,11 @@ async def process_segment(
         progress_callback,
     )
 
-    # Save propagated masks to database
-    skip_frames = {segment.source_frame}
-    if segment.anchor_frame is not None:
-        skip_frames.add(segment.anchor_frame)
-    filtered_segments = {
-        frame_idx: obj_masks
-        for frame_idx, obj_masks in video_segments.items()
-        if frame_idx not in skip_frames
-        and segment.start_frame <= frame_idx <= segment.end_frame
-    }
+    filtered_segments = select_frames_to_save(video_segments, segment)
     async for db in db_factory():
         await save_segment_masks(
             filtered_segments,
             label_id_to_obj_id,
-            segment.source_frame,
             project_id,
             db,
         )
